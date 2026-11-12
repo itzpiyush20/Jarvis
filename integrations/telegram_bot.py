@@ -76,18 +76,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
-    # If the user asks about schedule or emails in natural language, inject Google context
     context_data = ""
     lower = user_text.lower()
-    if any(k in lower for k in ["schedule", "calendar", "meeting", "events", "agenda"]):
-        if google.is_configured():
-            context_data += f"\nCurrent Calendar Agenda:\n{google.format_daily_agenda()}\n"
-    if any(k in lower for k in ["email", "gmail", "inbox", "mail"]):
-        if google.is_configured():
-            unreads = google.get_unread_emails(max_results=3)
-            context_data += f"\nRecent Unread Emails: {unreads}\n"
 
-    reply = brain.ask(user_text, context=context_data)
+    def fetch_context():
+        ctx = ""
+        if any(k in lower for k in ["schedule", "calendar", "meeting", "events", "agenda"]):
+            if google.is_configured():
+                ctx += f"\nCurrent Calendar Agenda:\n{google.format_daily_agenda()}\n"
+        if any(k in lower for k in ["email", "gmail", "inbox", "mail"]):
+            if google.is_configured():
+                unreads = google.get_unread_emails(max_results=3)
+                ctx += f"\nRecent Unread Emails: {unreads}\n"
+        return ctx
+
+    # Run blocking I/O in thread to prevent blocking asyncio loop
+    context_data = await asyncio.to_thread(fetch_context)
+    reply = await asyncio.to_thread(brain.ask, user_text, context_data)
+
     await update.message.reply_text(reply)
 
 async def agenda_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -95,10 +101,11 @@ async def agenda_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if not google.is_configured():
         await update.message.reply_text(
-            "⚠️ Google Calendar is not yet linked, Sir.\nPlease add `credentials.json` to enable calendar syncing."
+            "⚠️ Google Calendar is not yet linked, Sir.\nPlease add credentials.json to enable calendar syncing."
         )
         return
-    agenda = google.format_daily_agenda()
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    agenda = await asyncio.to_thread(google.format_daily_agenda)
     await update.message.reply_text(f"📅 **Calendar Agenda:**\n{agenda}")
 
 async def emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -106,10 +113,11 @@ async def emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if not google.is_configured():
         await update.message.reply_text(
-            "⚠️ Gmail is not yet linked, Sir.\nPlease add `credentials.json` to enable email syncing."
+            "⚠️ Gmail is not yet linked, Sir.\nPlease add credentials.json to enable email syncing."
         )
         return
-    emails = google.get_unread_emails(max_results=5)
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    emails = await asyncio.to_thread(google.get_unread_emails, 5)
     if not emails:
         await update.message.reply_text("📭 Inbox zero! You have no unread emails, Sir.")
         return
@@ -125,7 +133,7 @@ async def handle_voice_reply_request(update: Update, context: ContextTypes.DEFAU
     query = " ".join(context.args) if context.args else "Report current status and readiness."
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
 
-    reply = brain.ask(query)
+    reply = await asyncio.to_thread(brain.ask, query, "")
     audio_path = await generate_speech_file(reply, filename=f"reply_{update.message.id}.mp3")
 
     with open(audio_path, "rb") as audio:
@@ -153,13 +161,13 @@ async def note_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not note_text:
         await update.message.reply_text("Usage: `/note your note content here`", parse_mode="Markdown")
         return
-    note_id = memory.add_note(note_text)
+    note_id = await asyncio.to_thread(memory.add_note, note_text)
     await update.message.reply_text(f"📝 Note saved (ID #{note_id}):\n_{note_text}_", parse_mode="Markdown")
 
 async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
-    tasks = memory.get_pending_tasks()
+    tasks = await asyncio.to_thread(memory.get_pending_tasks)
     if not tasks:
         await update.message.reply_text("✅ No pending tasks, Sir. Your slate is clean.")
         return
