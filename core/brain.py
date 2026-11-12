@@ -1,6 +1,7 @@
 import json
 import urllib.request
 import urllib.error
+import time
 from typing import Dict, Any, List
 import config
 
@@ -11,14 +12,21 @@ Always be concise, articulate, and respectful. Address the user naturally as {co
 Keep answers brief and suited for voice playback unless {config.USER_NAME} asks for detailed elaboration.
 """
 
+# Tested and responsive models for the Gemini Free Tier
+PREFERRED_MODELS = [
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash"
+]
+
 class JarvisBrain:
-    def __init__(self, api_key: str = config.GEMINI_API_KEY, model: str = "gemini-1.5-flash"):
-        self.api_key = api_key
-        self.model = model
-        self.endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+    def __init__(self, api_key: str = config.GEMINI_API_KEY, models: List[str] = PREFERRED_MODELS):
+        self.api_key = api_key or config.GEMINI_API_KEY
+        self.models = models
 
     def ask(self, prompt: str, context: str = "") -> str:
-        """Sends a prompt to Gemini and returns the assistant's reply."""
+        """Sends a prompt to Gemini with automatic model failover and returns the assistant reply."""
         if not self.api_key:
             return "Sir, the Gemini API key is missing. Please configure GEMINI_API_KEY in your .env file."
 
@@ -39,21 +47,27 @@ class JarvisBrain:
             }
         }
 
-        req = urllib.request.Request(
-            self.endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
+        last_error = ""
+        for model in self.models:
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=12) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                    candidates = result.get("candidates", [])
+                    if candidates:
+                        return candidates[0]["content"]["parts"][0]["text"].strip()
+            except urllib.error.HTTPError as e:
+                err_msg = e.read().decode("utf-8")
+                last_error = f"HTTP {e.code} ({model})"
+                # On 503 or 404, fall through to next model
+                continue
+            except Exception as e:
+                last_error = f"{e} ({model})"
+                continue
 
-        try:
-            with urllib.request.urlopen(req, timeout=15) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                candidates = result.get("candidates", [])
-                if candidates:
-                    return candidates[0]["content"]["parts"][0]["text"].strip()
-                return "I received an empty response from the core, sir."
-        except urllib.error.HTTPError as e:
-            err = e.read().decode("utf-8")
-            return f"Network error during cognitive processing: HTTP {e.code}. Details: {err}"
-        except Exception as e:
-            return f"An unexpected error occurred, sir: {str(e)}"
+        return f"Apologies, sir. Cognitive processing was momentarily interrupted ({last_error}). Please try again."

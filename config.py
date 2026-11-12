@@ -1,12 +1,30 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent
 
-# Load .env file
-load_dotenv(BASE_DIR / ".env")
+def load_env():
+    """Loads .env file into os.environ with fallback if python-dotenv isn't installed."""
+    env_file = BASE_DIR / ".env"
+    if not env_file.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+    except ImportError:
+        with open(env_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip("'\"")
+                if k not in os.environ:
+                    os.environ[k] = v
+
+load_env()
 
 # API Keys & Config
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
