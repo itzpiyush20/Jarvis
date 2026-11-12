@@ -1,186 +1,123 @@
 import datetime
+import json
 import os
 import sys
+import urllib.request
+import urllib.error
+import urllib.parse
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-# Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-
-SCOPES = [
-    "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
-]
-
-CREDENTIALS_FILE = PROJECT_ROOT / "credentials.json"
 TOKEN_FILE = PROJECT_ROOT / "token.json"
 
 class GoogleServices:
-    """Manages integration with Google Calendar and Gmail via OAuth 2.0."""
+    """Fast, direct HTTP integration for Google Calendar and Gmail."""
 
     def __init__(self):
-        self.creds: Optional[Credentials] = None
-        self._calendar_service = None
-        self._gmail_service = None
-        self.authenticate()
+        self._token_data = {}
+        self.load_token()
 
     def is_configured(self) -> bool:
-        """Returns True if credentials.json or token.json exists."""
-        return TOKEN_FILE.exists() or CREDENTIALS_FILE.exists()
+        return TOKEN_FILE.exists()
 
-    def authenticate(self):
-        """Loads cached token or initiates desktop browser authorization."""
+    def load_token(self):
         if TOKEN_FILE.exists():
-            self.creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+            try:
+                with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+                    self._token_data = json.load(f)
+            except Exception as e:
+                print(f"[-] Error loading token.json: {e}")
 
-        if not self.creds or not self.creds.valid:
-            if self.creds and self.creds.expired and self.creds.refresh_token:
-                try:
-                    self.creds.refresh(Request())
-                    with open(TOKEN_FILE, "w", encoding="utf-8") as f:
-                        f.write(self.creds.to_json())
-                except Exception as e:
-                    print(f"[-] Token refresh failed: {e}")
-                    self.creds = None
+    def get_token(self) -> Optional[str]:
+        if not self._token_data:
+            self.load_token()
+        return self._token_data.get("token")
 
-            if not self.creds and CREDENTIALS_FILE.exists():
-                print("[*] Launching browser to authorize Google Workspace (Calendar & Gmail)...")
-                flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-                self.creds = flow.run_local_server(port=0)
-                with open(TOKEN_FILE, "w", encoding="utf-8") as token:
-                    token.write(self.creds.to_json())
-                print("[+] Successfully authorized and saved token.json!")
+    def _get(self, url: str) -> Optional[Dict[str, Any]]:
+        token = self.get_token()
+        if not token:
+            return None
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            print(f"[-] Google GET error ({url[:60]}...): {e}")
+            return None
 
-        if self.creds and self.creds.valid:
-            self._calendar_service = build("calendar", "v3", credentials=self.creds)
-            self._gmail_service = build("gmail", "v1", credentials=self.creds)
-
-    # ------------------ GOOGLE CALENDAR ------------------ #
-
-    def get_upcoming_events(self, max_results: int = 10) -> List[Dict[str, Any]]:
-        """Fetches upcoming calendar events starting from now."""
-        if not self._calendar_service:
-            return []
-
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        events_result = (
-            self._calendar_service.events()
-            .list(
-                calendarId="primary",
-                timeMin=now,
-                maxResults=max_results,
-                singleEvents=True,
-                orderBy="startTime",
-            )
-            .execute()
+    def _post(self, url: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        token = self.get_token()
+        if not token:
+            return None
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         )
-        events = events_result.get("items", [])
-        formatted = []
-        for event in events:
-            start = event["start"].get("dateTime", event["start"].get("date"))
-            formatted.append({
-                "id": event.get("id"),
-                "summary": event.get("summary", "(No Title)"),
-                "start": start,
-                "location": event.get("location", ""),
-                "description": event.get("description", ""),
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            print(f"[-] Google POST error: {e}")
+            return None
+
+    # ------------------ CALENDAR ------------------ #
+
+    def get_upcoming_events(self, max_results: int = 5) -> List[Dict[str, Any]]:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        encoded_now = urllib.parse.quote(now)
+        url = (
+            f"https://www.googleapis.com/calendar/v3/calendars/primary/events?"
+            f"timeMin={encoded_now}&maxResults={max_results}&singleEvents=true&orderBy=startTime"
+        )
+        data = self._get(url)
+        if not data:
+            return []
+        events = []
+        for item in data.get("items", []):
+            start = item.get("start", {}).get("dateTime", item.get("start", {}).get("date"))
+            events.append({
+                "summary": item.get("summary", "(Untitled Event)"),
+                "start": start
             })
-        return formatted
-
-    def create_event(
-        self,
-        summary: str,
-        start_time_iso: str,
-        end_time_iso: str,
-        description: str = "",
-        location: str = ""
-    ) -> Dict[str, Any]:
-        """Creates a new calendar event."""
-        if not self._calendar_service:
-            raise RuntimeError("Google Calendar service not authenticated.")
-
-        event_body = {
-            "summary": summary,
-            "location": location,
-            "description": description,
-            "start": {"dateTime": start_time_iso, "timeZone": "Asia/Kolkata"},
-            "end": {"dateTime": end_time_iso, "timeZone": "Asia/Kolkata"},
-        }
-        return self._calendar_service.events().insert(calendarId="primary", body=event_body).execute()
+        return events
 
     def format_daily_agenda(self) -> str:
-        """Formats upcoming events into a human/speech-friendly summary."""
         events = self.get_upcoming_events(max_results=5)
         if not events:
-            return "You have no upcoming events on your calendar, Sir. Your schedule is clear."
-
-        lines = ["Here is your upcoming schedule:"]
+            return "You have no upcoming events scheduled on your calendar, Sir."
+        lines = ["Here is your upcoming schedule, Sir:"]
         for ev in events:
-            time_str = ev["start"]
-            lines.append(f"• {ev['summary']} at {time_str}")
+            lines.append(f"• {ev['summary']} (at {ev['start']})")
         return "\n".join(lines)
 
     # ------------------ GMAIL ------------------ #
 
     def get_unread_emails(self, max_results: int = 5) -> List[Dict[str, str]]:
-        """Fetches unread emails from the inbox."""
-        if not self._gmail_service:
+        query = urllib.parse.quote("is:unread label:INBOX")
+        url = f"https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults={max_results}&q={query}"
+        data = self._get(url)
+        if not data:
             return []
-
-        results = (
-            self._gmail_service.users()
-            .messages()
-            .list(userId="me", q="is:unread label:INBOX", maxResults=max_results)
-            .execute()
-        )
-        messages = results.get("messages", [])
         email_list = []
-
-        for msg in messages:
-            msg_data = (
-                self._gmail_service.users()
-                .messages()
-                .get(userId="me", id=msg["id"], format="metadata")
-                .execute()
-            )
-            headers = msg_data.get("payload", {}).get("headers", [])
+        for msg in data.get("messages", []):
+            msg_url = f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg['id']}?format=metadata"
+            detail = self._get(msg_url)
+            if not detail:
+                continue
+            headers = detail.get("payload", {}).get("headers", [])
             subject = next((h["value"] for h in headers if h["name"].lower() == "subject"), "(No Subject)")
             sender = next((h["value"] for h in headers if h["name"].lower() == "from"), "Unknown")
-            snippet = msg_data.get("snippet", "")
-
             email_list.append({
-                "id": msg["id"],
                 "from": sender,
                 "subject": subject,
-                "snippet": snippet,
+                "snippet": detail.get("snippet", "")[:120]
             })
         return email_list
 
-    def check_urgent_emails(self) -> List[Dict[str, str]]:
-        """Scans unread emails for urgent keywords."""
-        keywords = ["urgent", "important", "action required", "immediate", "alert", "critical"]
-        unreads = self.get_unread_emails(max_results=10)
-        urgent = []
-        for email in unreads:
-            text_to_check = (email["subject"] + " " + email["snippet"]).lower()
-            if any(k in text_to_check for k in keywords):
-                urgent.append(email)
-        return urgent
-
 if __name__ == "__main__":
     gs = GoogleServices()
-    if not gs.is_configured():
-        print("[!] Google Workspace is not configured yet.")
-        print("    Please place your 'credentials.json' (Desktop App Client ID) in the Jarvis root folder.")
-    else:
-        print("[+] Testing Google Services connection...")
-        agenda = gs.format_daily_agenda()
-        print(f"[+] Agenda: {agenda}")
+    print("Testing agenda:", gs.format_daily_agenda())
+    emails = gs.get_unread_emails(max_results=2)
+    print(f"Testing emails ({len(emails)}):", emails)

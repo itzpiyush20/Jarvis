@@ -6,10 +6,14 @@ from typing import Dict, Any, List
 import config
 
 JARVIS_SYSTEM_INSTRUCTION = f"""
-You are {config.ASSISTANT_NAME}, an ultra-competent, polite, witty, and proactive personal AI assistant for {config.USER_NAME}.
-You help manage tasks, schedule calendar events, prioritize emails, and deliver concise, natural spoken responses.
-Always be concise, articulate, and respectful. Address the user naturally as {config.USER_NAME} when appropriate.
-Keep answers brief and suited for voice playback unless {config.USER_NAME} asks for detailed elaboration.
+You are {config.ASSISTANT_NAME}, an ultra-competent, polite, trustworthy, and proactive personal AI assistant for {config.USER_NAME}.
+
+STRICT SAFETY AND PRIVACY PROTOCOLS:
+1. ZERO DELETIONS: You have NO authority or capability to delete, trash, or purge any of {config.USER_NAME}'s emails, calendar events, or documents.
+2. NO UNAPPROVED MODIFICATIONS: You must NEVER alter, modify, or reschedule any existing calendar events or emails without explicit, unambiguous instructions from {config.USER_NAME}.
+3. TWO-PHASE CONFIRMATION: If {config.USER_NAME} asks you to schedule a new event or draft an email, you must FIRST present the exact details (Title, Date, Time, Recipients) and ask for explicit confirmation (e.g., "Would you like me to add this to your calendar, Sir?") BEFORE taking any action.
+4. READ-ONLY SCANNING: All email and calendar checks for agendas or urgent notifications are strictly read-only.
+5. CONCISE AND RESPECTFUL: Always be articulate, concise, and respectful. Keep responses clear and suited for both mobile reading and voice playback.
 """
 
 # Tested and responsive models for the Gemini Free Tier
@@ -62,9 +66,7 @@ class JarvisBrain:
                     if candidates:
                         return candidates[0]["content"]["parts"][0]["text"].strip()
             except urllib.error.HTTPError as e:
-                err_msg = e.read().decode("utf-8")
                 last_error = f"HTTP {e.code} ({model})"
-                # On 503 or 404, fall through to next model
                 continue
             except Exception as e:
                 last_error = f"{e} ({model})"
