@@ -22,12 +22,14 @@ import config
 from core.brain import JarvisBrain
 from core.memory import MemoryManager
 from voice.tts import generate_speech_file
+from integrations.google_services import GoogleServices
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("JarvisTelegram")
 
 brain = JarvisBrain()
 memory = MemoryManager()
+google = GoogleServices()
 
 def is_authorized(update: Update) -> bool:
     """Verifies that the sender matches TELEGRAM_USER_ID if configured."""
@@ -39,7 +41,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     user_name = update.effective_user.first_name or config.USER_NAME
 
-    # If TELEGRAM_USER_ID is not configured yet, save it to .env
     if not config.TELEGRAM_USER_ID:
         config.TELEGRAM_USER_ID = user_id
         env_path = PROJECT_ROOT / ".env"
@@ -55,13 +56,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Registered primary user ID: {user_id}")
 
     welcome = (
-        f"🎙️ **Greetings, {user_name}.** {config.ASSISTANT_NAME} is online and paired to this device.\n\n"
-        f"**Commands you can use:**\n"
-        f"• Send any text or question → I will answer.\n"
-        f"• `/voice <text>` → I will respond with a spoken voice note.\n"
-        f"• `/note <text>` → Save a quick note to long-term memory.\n"
-        f"• `/tasks` → View your pending tasks and reminders.\n"
-        f"• `/alert <urgent message>` → Trigger an urgent priority alarm with voice.\n"
+        f"🎙️ **Greetings, {user_name}.** {config.ASSISTANT_NAME} is online and operational.\n\n"
+        f"**Commands at your disposal:**\n"
+        f"• Send any question/instruction → I will assist you.\n"
+        f"• `/voice <query>` → I will answer with a spoken voice note.\n"
+        f"• `/agenda` → View your upcoming Google Calendar meetings.\n"
+        f"• `/emails` → Review unread Gmail messages & urgent alerts.\n"
+        f"• `/alert <urgent message>` → Trigger an urgent priority alarm.\n"
+        f"• `/tasks` → View your task list.\n"
+        f"• `/note <text>` → Save a note to long-term memory.\n"
     )
     await update.message.reply_text(welcome, parse_mode="Markdown")
 
@@ -73,12 +76,49 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
-    # Ask Jarvis Brain
-    reply = brain.ask(user_text)
+    # If the user asks about schedule or emails in natural language, inject Google context
+    context_data = ""
+    lower = user_text.lower()
+    if any(k in lower for k in ["schedule", "calendar", "meeting", "events", "agenda"]):
+        if google.is_configured():
+            context_data += f"\nCurrent Calendar Agenda:\n{google.format_daily_agenda()}\n"
+    if any(k in lower for k in ["email", "gmail", "inbox", "mail"]):
+        if google.is_configured():
+            unreads = google.get_unread_emails(max_results=3)
+            context_data += f"\nRecent Unread Emails: {unreads}\n"
+
+    reply = brain.ask(user_text, context=context_data)
     await update.message.reply_text(reply)
 
+async def agenda_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update):
+        return
+    if not google.is_configured():
+        await update.message.reply_text(
+            "⚠️ Google Calendar is not yet linked, Sir.\nPlease add `credentials.json` to enable calendar syncing."
+        )
+        return
+    agenda = google.format_daily_agenda()
+    await update.message.reply_text(f"📅 **Calendar Agenda:**\n{agenda}")
+
+async def emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update):
+        return
+    if not google.is_configured():
+        await update.message.reply_text(
+            "⚠️ Gmail is not yet linked, Sir.\nPlease add `credentials.json` to enable email syncing."
+        )
+        return
+    emails = google.get_unread_emails(max_results=5)
+    if not emails:
+        await update.message.reply_text("📭 Inbox zero! You have no unread emails, Sir.")
+        return
+    msg = f"📬 **Unread Emails ({len(emails)}):**\n\n"
+    for em in emails:
+        msg += f"• **From:** {em['from']}\n  **Subject:** {em['subject']}\n  _{em['snippet'][:100]}..._\n\n"
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
 async def handle_voice_reply_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Answers the user query with both text AND a spoken voice note."""
     if not is_authorized(update):
         return
 
@@ -86,22 +126,18 @@ async def handle_voice_reply_request(update: Update, context: ContextTypes.DEFAU
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
 
     reply = brain.ask(query)
-    # Generate audio
     audio_path = await generate_speech_file(reply, filename=f"reply_{update.message.id}.mp3")
 
-    # Send audio voice note
     with open(audio_path, "rb") as audio:
         await update.message.reply_voice(voice=audio, caption=reply)
 
 async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Simulates an urgent call/alarm with priority notification and voice message."""
     if not is_authorized(update):
         return
 
     alert_msg = " ".join(context.args) if context.args else "Attention Sir: Urgent action required!"
     spoken_text = f"Sir, urgent alert: {alert_msg}"
 
-    # Generate urgent audio
     audio_path = await generate_speech_file(spoken_text, filename="urgent_alert.mp3")
 
     with open(audio_path, "rb") as audio:
@@ -138,15 +174,13 @@ def start_telegram_service():
     token = config.TELEGRAM_BOT_TOKEN
     if not token:
         print("\n[!] TELEGRAM_BOT_TOKEN is not configured in .env.")
-        print("    1. Open Telegram and search for @BotFather")
-        print("    2. Send '/newbot', give it a name (e.g. 'MyJarvisBot') and a username")
-        print("    3. Copy the HTTP API token BotFather gives you")
-        print("    4. Paste it into your .env file: TELEGRAM_BOT_TOKEN=your_token_here\n")
         return
 
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("voice", handle_voice_reply_request))
+    app.add_handler(CommandHandler("agenda", agenda_command))
+    app.add_handler(CommandHandler("emails", emails_command))
     app.add_handler(CommandHandler("alert", alert_command))
     app.add_handler(CommandHandler("note", note_command))
     app.add_handler(CommandHandler("tasks", tasks_command))
