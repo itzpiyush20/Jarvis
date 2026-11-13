@@ -114,12 +114,13 @@ class JarvisBrain:
                 headers={"Content-Type": "application/json"}
             )
             try:
-                with urllib.request.urlopen(req, timeout=15) as response:
+                with urllib.request.urlopen(req, timeout=25) as response:
                     result = json.loads(response.read().decode("utf-8"))
                     candidates = result.get("candidates", [])
                     if candidates:
                         return candidates[0]["content"]["parts"][0]["text"].strip()
-            except Exception:
+            except Exception as e:
+                print(f"[-] Transcribe attempt with {model} failed: {e}")
                 continue
 
         return ""

@@ -104,30 +104,45 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(reply)
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Processes incoming Telegram voice notes with Gemini speech-to-text and voice reply."""
+    """Processes incoming Telegram voice notes and audio files with Gemini speech-to-text and voice reply."""
     if not is_authorized(update):
         await update.message.reply_text("⛔ Unauthorized access.")
         return
 
+    media = update.message.voice or update.message.audio or update.message.document
+    if not media:
+        return
+
+    logger.info(f"[*] Received voice/audio message from user {update.effective_user.id}")
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     try:
-        # Download user voice note (.ogg / Opus format)
-        voice = update.message.voice
-        voice_file = await voice.get_file()
-        voice_bytes = await voice_file.download_as_bytearray()
+        media_file = await media.get_file()
+        audio_bytes = await media_file.download_as_bytearray()
 
-        # Transcribe speech
+        raw_mime = getattr(media, "mime_type", "") or "audio/ogg"
+        if "ogg" in raw_mime or "opus" in raw_mime:
+            mime_type = "audio/ogg"
+        elif "mp3" in raw_mime or "mpeg" in raw_mime:
+            mime_type = "audio/mp3"
+        elif "m4a" in raw_mime or "mp4" in raw_mime or "aac" in raw_mime:
+            mime_type = "audio/mp4"
+        elif "wav" in raw_mime:
+            mime_type = "audio/wav"
+        else:
+            mime_type = "audio/ogg"
+
+        # Transcribe speech with Gemini
         transcribed_text = await asyncio.to_thread(
             brain.transcribe_audio,
-            bytes(voice_bytes),
-            "audio/ogg"
+            bytes(audio_bytes),
+            mime_type
         )
 
         if not transcribed_text:
             await update.message.reply_text(
-                "Apologies, Sir. I was unable to discern your spoken message. "
-                "Could you please try repeating it, or send it in text?"
+                "Apologies, Sir. I was unable to transcribe your audio message. "
+                "Could you please repeat that, or send it in text?"
             )
             return
 
@@ -136,20 +151,35 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         context_data = await asyncio.to_thread(get_context_for_query, transcribed_text)
         reply = await asyncio.to_thread(brain.ask, transcribed_text, context_data)
 
-        # Synthesize spoken response
-        audio_path = await generate_speech_file(reply, filename=f"reply_voice_{update.message.id}.mp3")
+        # Synthesize spoken response with timeout fallback
+        audio_sent = False
+        try:
+            audio_path = await asyncio.wait_for(
+                generate_speech_file(reply, filename=f"reply_voice_{update.message.id}.mp3"),
+                timeout=12.0
+            )
+            caption = f"🗣️ *\"{transcribed_text}\"*\n\n{reply}"
+            with open(audio_path, "rb") as audio:
+                if len(caption) <= 1024:
+                    try:
+                        await update.message.reply_voice(voice=audio, caption=caption, parse_mode="Markdown")
+                        audio_sent = True
+                    except Exception:
+                        await update.message.reply_voice(voice=audio, caption=caption, parse_mode=None)
+                        audio_sent = True
+                else:
+                    await update.message.reply_voice(voice=audio, caption=f"🗣️ *\"{transcribed_text}\"*", parse_mode=None)
+                    await update.message.reply_text(reply)
+                    audio_sent = True
+        except Exception as tts_err:
+            logger.warning(f"TTS voice synthesis timed out or failed ({tts_err}), responding in text.")
 
-        caption = f"🗣️ *\"{transcribed_text}\"*\n\n{reply}"
-        with open(audio_path, "rb") as audio:
-            if len(caption) <= 1024:
-                await update.message.reply_voice(voice=audio, caption=caption, parse_mode="Markdown")
-            else:
-                await update.message.reply_voice(voice=audio, caption=f"🗣️ *\"{transcribed_text}\"*", parse_mode="Markdown")
-                await update.message.reply_text(reply)
+        if not audio_sent:
+            await update.message.reply_text(f"🗣️ *\"{transcribed_text}\"*\n\n{reply}")
 
     except Exception as e:
-        logger.error(f"[-] Error processing incoming voice message: {e}")
-        await update.message.reply_text(f"Apologies, Sir. An error occurred processing your voice note: {e}")
+        logger.error(f"[-] Error processing incoming voice/audio message: {e}", exc_info=True)
+        await update.message.reply_text(f"Apologies, Sir. An error occurred processing your audio: {e}")
 
 async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delivers an on-demand audio and text briefing."""
@@ -322,7 +352,7 @@ def build_telegram_application():
     app.add_handler(CommandHandler("tasks", tasks_command))
     app.add_handler(CommandHandler("briefing", briefing_command))
     app.add_handler(CommandHandler("status", status_command))
-    app.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_voice_message))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
     return app
 
