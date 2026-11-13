@@ -272,11 +272,36 @@ async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"• #{t['id']}: {t['title']}{urgency}{due}\n"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
+from telegram.request import HTTPXRequest
+from aiohttp import web
+
+async def health_check_handler(request):
+    return web.Response(text="🟢 Jarvis Assistant Service is operational.")
+
+async def start_health_server():
+    """Lightweight HTTP server on $PORT for cloud platforms (Render, Koyeb, etc.)."""
+    port_str = os.environ.get("PORT")
+    if not port_str:
+        return
+    try:
+        port = int(port_str)
+        app = web.Application()
+        app.router.add_get("/", health_check_handler)
+        app.router.add_get("/health", health_check_handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        logger.info(f"[+] Health check server listening on port {port}")
+    except Exception as e:
+        logger.error(f"[-] Could not start cloud health check server: {e}")
+
 async def on_post_init(app):
-    """Initializes background scheduler loop upon application startup."""
+    """Initializes background scheduler loop and health server upon application startup."""
     scheduler.bot_app = app
     asyncio.create_task(scheduler.run_loop())
-    logger.info("[+] Autonomous Scheduler task registered with event loop.")
+    asyncio.create_task(start_health_server())
+    logger.info("[+] Autonomous Scheduler & Cloud Health check registered with event loop.")
 
 from telegram.request import HTTPXRequest
 
