@@ -23,6 +23,7 @@ from core.brain import JarvisBrain
 from core.memory import MemoryManager
 from voice.tts import generate_speech_file
 from integrations.google_services import GoogleServices
+from core.scheduler import JarvisScheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("JarvisTelegram")
@@ -30,12 +31,29 @@ logger = logging.getLogger("JarvisTelegram")
 brain = JarvisBrain()
 memory = MemoryManager()
 google = GoogleServices()
+scheduler = JarvisScheduler()
 
 def is_authorized(update: Update) -> bool:
     """Verifies that the sender matches TELEGRAM_USER_ID if configured."""
     if not config.TELEGRAM_USER_ID:
         return True
     return str(update.effective_user.id) == str(config.TELEGRAM_USER_ID)
+
+def get_context_for_query(query: str) -> str:
+    """Gathers calendar, email, or task context relevant to the user query."""
+    lower = query.lower()
+    ctx = ""
+    if any(k in lower for k in ["schedule", "calendar", "meeting", "events", "agenda"]):
+        if google.is_configured():
+            ctx += f"\nCurrent Calendar Agenda:\n{google.format_daily_agenda()}\n"
+    if any(k in lower for k in ["email", "gmail", "inbox", "mail"]):
+        if google.is_configured():
+            unreads = google.get_unread_emails(max_results=3)
+            ctx += f"\nRecent Unread Emails: {unreads}\n"
+    if any(k in lower for k in ["task", "todo", "reminder", "notes"]):
+        pending = memory.get_pending_tasks()
+        ctx += f"\nPending Tasks in Database: {pending}\n"
+    return ctx
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -56,15 +74,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Registered primary user ID: {user_id}")
 
     welcome = (
-        f"🎙️ **Greetings, {user_name}.** {config.ASSISTANT_NAME} is online and operational.\n\n"
-        f"**Commands at your disposal:**\n"
-        f"• Send any question/instruction → I will assist you.\n"
-        f"• `/voice <query>` → I will answer with a spoken voice note.\n"
-        f"• `/agenda` → View your upcoming Google Calendar meetings.\n"
+        f"🎙️ **Greetings, {user_name}.** {config.ASSISTANT_NAME} is fully online and operational.\n\n"
+        f"**Voice & Conversational Abilities:**\n"
+        f"• **Send Voice Notes 🗣️** → Speak naturally; I will transcribe your audio and reply in voice.\n"
+        f"• **Text Message** → Send any question, command, or instruction.\n"
+        f"• `/voice <query>` → Answer any query with a synthesized voice note.\n\n"
+        f"**Commands & Integrations:**\n"
+        f"• `/briefing` → Deliver a comprehensive spoken & text morning briefing.\n"
+        f"• `/agenda` → View upcoming Google Calendar meetings.\n"
         f"• `/emails` → Review unread Gmail messages & urgent alerts.\n"
-        f"• `/alert <urgent message>` → Trigger an urgent priority alarm.\n"
+        f"• `/alert <urgent message>` → Trigger an immediate priority voice alarm.\n"
         f"• `/tasks` → View your task list.\n"
         f"• `/note <text>` → Save a note to long-term memory.\n"
+        f"• `/status` → Inspect system diagnostics & status."
     )
     await update.message.reply_text(welcome, parse_mode="Markdown")
 
@@ -76,25 +98,96 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
-    context_data = ""
-    lower = user_text.lower()
-
-    def fetch_context():
-        ctx = ""
-        if any(k in lower for k in ["schedule", "calendar", "meeting", "events", "agenda"]):
-            if google.is_configured():
-                ctx += f"\nCurrent Calendar Agenda:\n{google.format_daily_agenda()}\n"
-        if any(k in lower for k in ["email", "gmail", "inbox", "mail"]):
-            if google.is_configured():
-                unreads = google.get_unread_emails(max_results=3)
-                ctx += f"\nRecent Unread Emails: {unreads}\n"
-        return ctx
-
-    # Run blocking I/O in thread to prevent blocking asyncio loop
-    context_data = await asyncio.to_thread(fetch_context)
+    context_data = await asyncio.to_thread(get_context_for_query, user_text)
     reply = await asyncio.to_thread(brain.ask, user_text, context_data)
 
     await update.message.reply_text(reply)
+
+async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Processes incoming Telegram voice notes with Gemini speech-to-text and voice reply."""
+    if not is_authorized(update):
+        await update.message.reply_text("⛔ Unauthorized access.")
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    try:
+        # Download user voice note (.ogg / Opus format)
+        voice = update.message.voice
+        voice_file = await voice.get_file()
+        voice_bytes = await voice_file.download_as_bytearray()
+
+        # Transcribe speech
+        transcribed_text = await asyncio.to_thread(
+            brain.transcribe_audio,
+            bytes(voice_bytes),
+            "audio/ogg"
+        )
+
+        if not transcribed_text:
+            await update.message.reply_text(
+                "Apologies, Sir. I was unable to discern your spoken message. "
+                "Could you please try repeating it, or send it in text?"
+            )
+            return
+
+        # Prepare context and query brain
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
+        context_data = await asyncio.to_thread(get_context_for_query, transcribed_text)
+        reply = await asyncio.to_thread(brain.ask, transcribed_text, context_data)
+
+        # Synthesize spoken response
+        audio_path = await generate_speech_file(reply, filename=f"reply_voice_{update.message.id}.mp3")
+
+        caption = f"🗣️ *\"{transcribed_text}\"*\n\n{reply}"
+        with open(audio_path, "rb") as audio:
+            if len(caption) <= 1024:
+                await update.message.reply_voice(voice=audio, caption=caption, parse_mode="Markdown")
+            else:
+                await update.message.reply_voice(voice=audio, caption=f"🗣️ *\"{transcribed_text}\"*", parse_mode="Markdown")
+                await update.message.reply_text(reply)
+
+    except Exception as e:
+        logger.error(f"[-] Error processing incoming voice message: {e}")
+        await update.message.reply_text(f"Apologies, Sir. An error occurred processing your voice note: {e}")
+
+async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delivers an on-demand audio and text briefing."""
+    if not is_authorized(update):
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
+    briefing_text = await scheduler.compile_briefing_text()
+    clean_spoken = (
+        f"Sir, here is your briefing. "
+        f"{briefing_text.replace('*', '').replace('`', '').replace('•', '')}"
+    )
+    try:
+        audio_path = await generate_speech_file(clean_spoken[:500], filename=f"briefing_{update.message.id}.mp3")
+        with open(audio_path, "rb") as audio:
+            await update.message.reply_voice(voice=audio, caption=briefing_text[:1024], parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"[-] Voice synthesis failed for briefing: {e}")
+        await update.message.reply_text(briefing_text, parse_mode="Markdown")
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays system status diagnostics."""
+    if not is_authorized(update):
+        return
+    cal_status = "🟢 Connected (Auto-refresh enabled)" if google.is_configured() else "🔴 Disconnected"
+    gemini_status = "🟢 Configured" if config.GEMINI_API_KEY else "🔴 Missing Key"
+    tasks_count = len(memory.get_pending_tasks())
+
+    msg = (
+        f"🛡️ **{config.ASSISTANT_NAME} System Diagnostics:**\n\n"
+        f"• **Cognitive Engine (Gemini)**: {gemini_status}\n"
+        f"• **Vocal Synthesis (Edge-TTS)**: 🟢 Active (en-GB-RyanNeural)\n"
+        f"• **Voice Recognition**: 🟢 Multimodal Audio Active\n"
+        f"• **Google Workspace**: {cal_status}\n"
+        f"• **Autonomous Scheduler**: 🟢 Active (Briefings & Guardians)\n"
+        f"• **Memory Database**: 🟢 Connected ({tasks_count} pending tasks)\n"
+        f"• **Primary User ID**: `{config.TELEGRAM_USER_ID or 'Not Set'}`"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def agenda_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
@@ -133,7 +226,8 @@ async def handle_voice_reply_request(update: Update, context: ContextTypes.DEFAU
     query = " ".join(context.args) if context.args else "Report current status and readiness."
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
 
-    reply = await asyncio.to_thread(brain.ask, query, "")
+    context_data = await asyncio.to_thread(get_context_for_query, query)
+    reply = await asyncio.to_thread(brain.ask, query, context_data)
     audio_path = await generate_speech_file(reply, filename=f"reply_{update.message.id}.mp3")
 
     with open(audio_path, "rb") as audio:
@@ -178,13 +272,22 @@ async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"• #{t['id']}: {t['title']}{urgency}{due}\n"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-def start_telegram_service():
+async def on_post_init(app):
+    """Initializes background scheduler loop upon application startup."""
+    scheduler.bot_app = app
+    asyncio.create_task(scheduler.run_loop())
+    logger.info("[+] Autonomous Scheduler task registered with event loop.")
+
+from telegram.request import HTTPXRequest
+
+def build_telegram_application():
     token = config.TELEGRAM_BOT_TOKEN
     if not token:
         print("\n[!] TELEGRAM_BOT_TOKEN is not configured in .env.")
-        return
+        return None
 
-    app = ApplicationBuilder().token(token).build()
+    request = HTTPXRequest(connect_timeout=20.0, read_timeout=30.0)
+    app = ApplicationBuilder().token(token).request(request).post_init(on_post_init).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("voice", handle_voice_reply_request))
     app.add_handler(CommandHandler("agenda", agenda_command))
@@ -192,12 +295,21 @@ def start_telegram_service():
     app.add_handler(CommandHandler("alert", alert_command))
     app.add_handler(CommandHandler("note", note_command))
     app.add_handler(CommandHandler("tasks", tasks_command))
+    app.add_handler(CommandHandler("briefing", briefing_command))
+    app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
+    return app
+
+def start_telegram_service():
+    app = build_telegram_application()
+    if not app:
+        return
 
     print("\n" + "=" * 55)
     print("[+] Jarvis Telegram Service is LIVE and listening for commands!")
     print("=" * 55 + "\n")
-    app.run_polling()
+    app.run_polling(bootstrap_retries=5, poll_interval=1.0)
 
 if __name__ == "__main__":
     start_telegram_service()

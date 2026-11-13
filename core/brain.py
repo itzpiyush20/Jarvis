@@ -1,8 +1,9 @@
 import json
+import base64
 import urllib.request
 import urllib.error
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import config
 
 JARVIS_SYSTEM_INSTRUCTION = f"""
@@ -18,6 +19,9 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
 
 # Tested and responsive models for the Gemini Free Tier
 PREFERRED_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
     "gemini-3.1-flash-lite",
     "gemini-flash-lite-latest",
     "gemini-3.8-flash",
@@ -73,3 +77,49 @@ class JarvisBrain:
                 continue
 
         return f"Apologies, sir. Cognitive processing was momentarily interrupted ({last_error}). Please try again."
+
+    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
+        """Transcribes audio speech to text using Gemini's native audio capabilities."""
+        if not self.api_key or not audio_bytes:
+            return ""
+
+        encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "inlineData": {
+                                "mimeType": mime_type,
+                                "data": encoded_audio
+                            }
+                        },
+                        {
+                            "text": "Transcribe the spoken words in this voice note accurately. Return ONLY the transcribed text without quotes, markdown headers, or explanations."
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 400
+            }
+        }
+
+        for model in self.models:
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                    candidates = result.get("candidates", [])
+                    if candidates:
+                        return candidates[0]["content"]["parts"][0]["text"].strip()
+            except Exception:
+                continue
+
+        return ""
