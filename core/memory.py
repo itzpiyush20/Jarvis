@@ -83,6 +83,9 @@ class MemoryManager:
             "meeting_alert_minutes": ("15", "Advance notice for calendar meetings in minutes"),
             "assistant_name": ("Jarvis", "Name of the assistant"),
             "user_name": ("Sir", "How the assistant addresses the user"),
+            "user_city": ("New Delhi", "Primary user city"),
+            "user_state": ("Delhi", "Primary user state"),
+            "user_country": ("India", "Primary user country"),
             "voice_name": ("en-IN-PrabhatNeural", "Voice model for spoken responses"),
             "language": ("en-IN", "Primary regional language context")
         }

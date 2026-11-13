@@ -19,6 +19,8 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.request import HTTPXRequest
+from aiohttp import web
 
 import config
 from core.brain import JarvisBrain
@@ -57,43 +59,6 @@ def get_context_for_query(query: str) -> str:
         ctx += f"\nPending Tasks in Database: {pending}\n"
     return ctx
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    user_name = update.effective_user.first_name or config.USER_NAME
-
-    if not config.TELEGRAM_USER_ID:
-        config.TELEGRAM_USER_ID = user_id
-        env_path = PROJECT_ROOT / ".env"
-        if env_path.exists():
-            with open(env_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            if "TELEGRAM_USER_ID=" in content:
-                content = content.replace("TELEGRAM_USER_ID=", f"TELEGRAM_USER_ID={user_id}")
-            else:
-                content += f"\nTELEGRAM_USER_ID={user_id}\n"
-            with open(env_path, "w", encoding="utf-8") as f:
-                f.write(content)
-        logger.info(f"Registered primary user ID: {user_id}")
-
-    welcome = (
-        f"🎙️ **Greetings, {user_name}.** {config.ASSISTANT_NAME} is fully online and operational.\n\n"
-        f"**Voice & Conversational Abilities:**\n"
-        f"• **Send Voice Notes 🗣️** → Speak naturally; I will transcribe your audio and reply in voice.\n"
-        f"• **Text Message** → Send any question, command, or instruction.\n"
-        f"• `/voice <query>` → Answer any query with a synthesized voice note.\n\n"
-        f"**Commands & Integrations:**\n"
-        f"• `/briefing` → Deliver a comprehensive spoken & text morning briefing.\n"
-        f"• `/agenda` → View upcoming Google Calendar meetings.\n"
-        f"• `/emails` → Review unread Gmail messages & urgent alerts.\n"
-        f"• `/alert <urgent message>` → Trigger an immediate priority voice alarm.\n"
-        f"• `/tasks` → View your task list.\n"
-        f"• `/note <text>` → Save a note to long-term memory.\n"
-        f"• `/settings` → Inspect and customize dynamic preferences.\n"
-        f"• `/voice_model` → Switch voice (Prabhat Indian 🇮🇳, Brian Global 🌐, Neerja Female 🇮🇳).\n"
-        f"• `/status` → Inspect system diagnostics & status."
-    )
-    await send_safe_html_reply(update, welcome)
-
 def format_to_telegram_html(text: str) -> str:
     """Converts CommonMark markdown into clean, beautiful, safe Telegram HTML."""
     if not text:
@@ -129,6 +94,7 @@ def format_to_telegram_html(text: str) -> str:
     # Bullet lists: normalize "- " or "* " to clean unicode bullet "• "
     text = re.sub(r'^\s*[-*]\s+', '• ', text, flags=re.MULTILINE)
 
+    # Restore code blocks
     for i, code in enumerate(code_blocks):
         escaped_code = html.escape(code.strip())
         text = text.replace(f"%%CODE_BLOCK_{i}%%", f"<pre>{escaped_code}</pre>")
@@ -147,6 +113,45 @@ async def send_safe_html_reply(update: Update, text: str):
         logger.warning(f"HTML parse failed ({e}), sending plain text.")
         await update.message.reply_text(text)
 
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    user_name = update.effective_user.first_name or config.USER_NAME
+
+    if not config.TELEGRAM_USER_ID:
+        config.TELEGRAM_USER_ID = user_id
+        env_path = PROJECT_ROOT / ".env"
+        if env_path.exists():
+            with open(env_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            if "TELEGRAM_USER_ID=" in content:
+                content = content.replace("TELEGRAM_USER_ID=", f"TELEGRAM_USER_ID={user_id}")
+            else:
+                content += f"\nTELEGRAM_USER_ID={user_id}\n"
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        logger.info(f"Registered primary user ID: {user_id}")
+
+    loc = brain.location_manager.get_user_location()
+
+    welcome = (
+        f"🎙️ **Greetings, {user_name}.** {config.ASSISTANT_NAME} is fully online and operational.\n\n"
+        f"📍 **Calibrated Location:** `{loc['display']}`\n\n"
+        f"**Voice & Conversational Abilities:**\n"
+        f"• **Send Voice Notes 🗣️** → Speak naturally; I will transcribe your audio and reply in voice.\n"
+        f"• **Text Message** → Send any question, command, search, or instruction.\n"
+        f"• **Share Location Pin 📍** → Drop your Telegram location pin anytime to recalibrate regional context.\n"
+        f"• `/voice <query>` → Answer any query with a synthesized voice note.\n\n"
+        f"**Commands & Real-Time Intelligence:**\n"
+        f"• `/briefing` → Deliver a comprehensive spoken & text morning briefing.\n"
+        f"• `/agenda` → View upcoming Google Calendar meetings.\n"
+        f"• `/emails` → Review unread Gmail messages & urgent alerts.\n"
+        f"• `/location <city>` → Check or update your active city/location.\n"
+        f"• `/settings` → Inspect and customize dynamic preferences.\n"
+        f"• `/voice_model` → Switch voice (Prabhat Indian 🇮🇳, Brian Global 🌐, Neerja Female 🇮🇳).\n"
+        f"• `/status` → Inspect system diagnostics & status."
+    )
+    await send_safe_html_reply(update, welcome)
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         await update.message.reply_text("⛔ Unauthorized access.")
@@ -158,6 +163,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context_data = await asyncio.to_thread(get_context_for_query, user_text)
     reply = await asyncio.to_thread(brain.ask, user_text, context_data)
 
+    await send_safe_html_reply(update, reply)
+
+async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles Telegram location pin sharing and calibrates regional location."""
+    if not is_authorized(update):
+        await update.message.reply_text("⛔ Unauthorized access.")
+        return
+
+    loc = update.message.location
+    if not loc:
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    loc_data = await asyncio.to_thread(brain.location_manager.update_from_coordinates, loc.latitude, loc.longitude)
+
+    reply = (
+        f"📍 <b>Location Updated Successfully</b>\n\n"
+        f"• <b>City / Area:</b> {loc_data.get('city')}\n"
+        f"• <b>State:</b> {loc_data.get('state')}\n"
+        f"• <b>Country:</b> {loc_data.get('country')}\n\n"
+        f"<i>All real-time gold rates, commodity prices, weather, and localized intelligence are now calibrated to {loc_data.get('display')}, Sir.</i>"
+    )
     await send_safe_html_reply(update, reply)
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -215,24 +242,27 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 generate_speech_file(reply, filename=f"reply_voice_{update.message.id}.mp3"),
                 timeout=12.0
             )
-            caption = f"🗣️ *\"{transcribed_text}\"*\n\n{reply}"
+            caption = f"🗣️ <i>\"{html.escape(transcribed_text)}\"</i>\n\n{reply}"
+            html_caption = format_to_telegram_html(caption)
+
             with open(audio_path, "rb") as audio:
-                if len(caption) <= 1024:
+                if len(html_caption) <= 1024:
                     try:
-                        await update.message.reply_voice(voice=audio, caption=caption, parse_mode="Markdown")
+                        await update.message.reply_voice(voice=audio, caption=html_caption, parse_mode="HTML")
                         audio_sent = True
                     except Exception:
-                        await update.message.reply_voice(voice=audio, caption=caption, parse_mode=None)
+                        await update.message.reply_voice(voice=audio, caption=caption[:1024], parse_mode=None)
                         audio_sent = True
                 else:
-                    await update.message.reply_voice(voice=audio, caption=f"🗣️ *\"{transcribed_text}\"*", parse_mode=None)
-                    await update.message.reply_text(reply)
+                    short_cap = format_to_telegram_html(f"🗣️ <i>\"{html.escape(transcribed_text)}\"</i>")
+                    await update.message.reply_voice(voice=audio, caption=short_cap, parse_mode="HTML")
+                    await send_safe_html_reply(update, reply)
                     audio_sent = True
         except Exception as tts_err:
             logger.warning(f"TTS voice synthesis timed out or failed ({tts_err}), responding in text.")
 
         if not audio_sent:
-            await send_safe_html_reply(update, f"🗣️ <i>\"{transcribed_text}\"</i>\n\n{reply}")
+            await send_safe_html_reply(update, f"🗣️ <i>\"{html.escape(transcribed_text)}\"</i>\n\n{reply}")
 
     except Exception as e:
         logger.error(f"[-] Error processing incoming voice/audio message: {e}", exc_info=True)
@@ -244,14 +274,12 @@ async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
     briefing_text = await scheduler.compile_briefing_text()
-    clean_spoken = (
-        f"Sir, here is your briefing. "
-        f"{briefing_text.replace('*', '').replace('`', '').replace('•', '')}"
-    )
     try:
-        audio_path = await generate_speech_file(clean_spoken[:500], filename=f"briefing_{update.message.id}.mp3")
+        audio_path = await generate_speech_file(briefing_text, filename=f"briefing_{update.message.id}.mp3")
         with open(audio_path, "rb") as audio:
-            await update.message.reply_voice(voice=audio, caption=briefing_text[:1024])
+            short_cap = format_to_telegram_html("🎙️ <b>Morning Executive Briefing</b>")
+            await update.message.reply_voice(voice=audio, caption=short_cap, parse_mode="HTML")
+            await send_safe_html_reply(update, briefing_text)
     except Exception as e:
         logger.error(f"[-] Voice synthesis failed for briefing: {e}")
         await send_safe_html_reply(update, briefing_text)
@@ -263,12 +291,15 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cal_status = "🟢 Connected (Auto-refresh enabled)" if google.is_configured() else "🔴 Disconnected"
     gemini_status = "🟢 Configured" if config.GEMINI_API_KEY else "🔴 Missing Key"
     tasks_count = len(memory.get_pending_tasks())
+    loc = brain.location_manager.get_user_location()
+    active_voice = memory.get_setting("voice_name", "en-IN-PrabhatNeural")
 
     msg = (
         f"🛡️ **{config.ASSISTANT_NAME} System Diagnostics:**\n\n"
         f"• **Cognitive Engine (Gemini)**: {gemini_status}\n"
-        f"• **Location Context**: 🇮🇳 India (IST, UTC+05:30)\n"
-        f"• **Vocal Synthesis (Edge-TTS)**: 🟢 Active (en-GB-RyanNeural)\n"
+        f"• **Location Context**: 📍 `{loc['display']}`\n"
+        f"• **Live Web Search**: 🟢 Active (Real-time Gold, Weather, News)\n"
+        f"• **Vocal Synthesis**: 🟢 Active (`{active_voice}`)\n"
         f"• **Continuous Learning**: 🟢 Active ({len(memory.get_learnings())} rules stored)\n"
         f"• **Google Workspace**: {cal_status}\n"
         f"• **Autonomous Scheduler**: 🟢 Active (Briefings & Guardians)\n"
@@ -281,9 +312,7 @@ async def agenda_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
     if not google.is_configured():
-        await update.message.reply_text(
-            "⚠️ Google Calendar is not yet linked, Sir."
-        )
+        await update.message.reply_text("⚠️ Google Calendar is not yet linked, Sir.")
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     agenda = await asyncio.to_thread(google.format_daily_agenda)
@@ -293,9 +322,7 @@ async def emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
     if not google.is_configured():
-        await update.message.reply_text(
-            "⚠️ Gmail is not yet linked, Sir."
-        )
+        await update.message.reply_text("⚠️ Gmail is not yet linked, Sir.")
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     emails = await asyncio.to_thread(google.get_unread_emails, 5)
@@ -304,7 +331,10 @@ async def emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     msg = f"📬 **Recent Unread Emails ({len(emails)}):**\n\n"
     for em in emails:
-        msg += f"• **From:** {em['from']}\n  **Subject:** {em['subject']}\n  _{em['snippet'][:120]}..._\n\n"
+        clean_subj = html.escape(em.get("subject", "No Subject"))
+        clean_from = html.escape(em.get("from", "Unknown"))
+        clean_snip = html.escape(em.get("snippet", "")[:120])
+        msg += f"• **From:** {clean_from}\n  **Subject:** {clean_subj}\n  _{clean_snip}..._\n\n"
     await send_safe_html_reply(update, msg)
 
 async def handle_voice_reply_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -319,7 +349,34 @@ async def handle_voice_reply_request(update: Update, context: ContextTypes.DEFAU
     audio_path = await generate_speech_file(reply, filename=f"reply_{update.message.id}.mp3")
 
     with open(audio_path, "rb") as audio:
-        await update.message.reply_voice(voice=audio, caption=reply)
+        short_cap = format_to_telegram_html(f"🗣️ <i>Voice Response</i>")
+        await update.message.reply_voice(voice=audio, caption=short_cap, parse_mode="HTML")
+        await send_safe_html_reply(update, reply)
+
+async def location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Allows checking or manually setting user location."""
+    if not is_authorized(update):
+        return
+
+    arg = " ".join(context.args).strip() if context.args else ""
+    if arg:
+        loc_data = await asyncio.to_thread(brain.location_manager.set_manual_location, arg)
+        msg = f"📍 <b>Location Updated:</b> Calibrated to <b>{loc_data.get('display')}</b>."
+        await send_safe_html_reply(update, msg)
+    else:
+        current = brain.location_manager.get_user_location()
+        msg = (
+            f"📍 <b>Current Calibrated Location:</b>\n"
+            f"• <b>Location:</b> <code>{current['display']}</code>\n"
+            f"• <b>City:</b> {current['city']}\n"
+            f"• <b>State:</b> {current['state']}\n"
+            f"• <b>Country:</b> {current['country']}\n\n"
+            f"<i>To change your location:</i>\n"
+            f"• Send a location pin directly in this chat, or\n"
+            f"• Type <code>/location &lt;City Name&gt;</code> (e.g. <code>/location Mumbai</code>), or\n"
+            f"• Simply tell me: <i>\"I am in Bengaluru\"</i>."
+        )
+        await send_safe_html_reply(update, msg)
 
 async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
@@ -333,7 +390,8 @@ async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(audio_path, "rb") as audio:
         await update.message.reply_voice(
             voice=audio,
-            caption=f"🚨 **URGENT ALARM** 🚨\n{alert_msg}"
+            caption=f"🚨 <b>URGENT ALARM</b> 🚨\n{html.escape(alert_msg)}",
+            parse_mode="HTML"
         )
 
 async def note_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -341,10 +399,10 @@ async def note_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     note_text = " ".join(context.args)
     if not note_text:
-        await update.message.reply_text("Usage: `/note your note content here`", parse_mode="Markdown")
+        await send_safe_html_reply(update, "Usage: <code>/note your note content here</code>")
         return
     note_id = await asyncio.to_thread(memory.add_note, note_text)
-    await update.message.reply_text(f"📝 Note saved (ID #{note_id}):\n_{note_text}_", parse_mode="Markdown")
+    await send_safe_html_reply(update, f"📝 <b>Note saved (ID #{note_id}):</b>\n<i>{html.escape(note_text)}</i>")
 
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays current dynamic configuration and explains how to update settings in chat."""
@@ -358,9 +416,13 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     b_hour = settings.get("briefing_hour", "8")
     b_min = settings.get("briefing_minute", "0").zfill(2)
     notice = settings.get("meeting_alert_minutes", "15")
+    voice = settings.get("voice_name", "en-IN-PrabhatNeural")
+    loc = brain.location_manager.get_user_location()
 
     msg = f"⚙️ **{a_name} Dynamic Configuration:**\n\n"
     msg += f"• **Your Name**: `{u_name}`\n"
+    msg += f"• **Active Location**: `{loc['display']}`\n"
+    msg += f"• **Active Voice Model**: `{voice}`\n"
     msg += f"• **Morning Briefing**: `{b_hour}:{b_min} IST`\n"
     msg += f"• **Meeting Notice Window**: `{notice} minutes`\n"
     msg += f"• **Timezone**: `Asia/Kolkata (IST)`\n\n"
@@ -371,7 +433,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"• _{l}_\n"
         msg += "\n"
 
-    msg += "💡 *To change any setting or add a rule, simply tell me in plain English! (e.g. 'Set briefing to 7:00 AM', 'Call me Piyush', or 'From now on always...')*"
+    msg += "💡 *To change any setting or add a rule, simply tell me in plain English! (e.g. 'Set briefing to 7:00 AM', 'Call me Piyush', 'I am in Mumbai', or 'From now on always...')*"
     await send_safe_html_reply(update, msg)
 
 async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -379,14 +441,14 @@ async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     tasks = await asyncio.to_thread(memory.get_pending_tasks)
     if not tasks:
-        await update.message.reply_text("✅ No pending tasks, Sir. Your slate is clean.")
+        await send_safe_html_reply(update, "✅ No pending tasks, Sir. Your slate is clean.")
         return
     msg = "📋 **Pending Tasks:**\n"
     for t in tasks:
         urgency = " 🔴 [URGENT]" if t.get("is_urgent") else ""
         due = f" (Due: {t.get('due_date')})" if t.get("due_date") else ""
         msg += f"• #{t['id']}: {t['title']}{urgency}{due}\n"
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await send_safe_html_reply(update, msg)
 
 async def voice_model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Allows inspecting and selecting neural voice models."""
@@ -426,9 +488,6 @@ async def voice_model_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         msg += "<i>Usage: <code>/voice_model brian</code> or tell me in chat 'Change voice to Brian'</i>"
         await send_safe_html_reply(update, msg)
 
-from telegram.request import HTTPXRequest
-from aiohttp import web
-
 async def health_check_handler(request):
     return web.Response(text="🟢 Jarvis Assistant Service is operational.")
 
@@ -457,8 +516,6 @@ async def on_post_init(app):
     asyncio.create_task(start_health_server())
     logger.info("[+] Autonomous Scheduler & Cloud Health check registered with event loop.")
 
-from telegram.request import HTTPXRequest
-
 def build_telegram_application():
     token = config.TELEGRAM_BOT_TOKEN
     if not token:
@@ -477,7 +534,9 @@ def build_telegram_application():
     app.add_handler(CommandHandler("briefing", briefing_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("settings", settings_command))
+    app.add_handler(CommandHandler("location", location_command))
     app.add_handler(CommandHandler("voice_model", voice_model_command))
+    app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_voice_message))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
     return app

@@ -8,15 +8,17 @@ import re
 from typing import Dict, Any, List, Optional
 import config
 from core.memory import MemoryManager
+from core.location import LocationManager
+from core.search import WebSearchEngine
 
 # Tested and responsive models for the Gemini Free Tier
 PREFERRED_MODELS = [
-    "gemini-2.5-flash",
     "gemini-flash-latest",
-    "gemini-3.8-flash",
+    "gemini-flash-lite-latest",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-3.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
+    "gemini-3.8-flash"
 ]
 
 class JarvisBrain:
@@ -24,6 +26,8 @@ class JarvisBrain:
         self.api_key = api_key or config.GEMINI_API_KEY
         self.models = models
         self.memory = MemoryManager()
+        self.location_manager = LocationManager(self.memory)
+        self.search_engine = WebSearchEngine()
 
     def _get_current_ist_string(self) -> str:
         """Returns current date and time formatted in Indian Standard Time (IST)."""
@@ -39,35 +43,43 @@ class JarvisBrain:
         briefing_m = self.memory.get_setting("briefing_minute", "0").zfill(2)
         alert_mins = self.memory.get_setting("meeting_alert_minutes", "15")
 
-        learnings = self.memory.get_learnings(25)
+        user_loc = self.location_manager.get_user_location()
+        loc_str = user_loc.get("display", "India")
+
+        learnings = self.memory.get_learnings(30)
         learnings_block = "\n".join(f"• {item}" for item in learnings) if learnings else "• None recorded yet."
 
         return f"""
 You are {assistant_name}, an elite, ultra-competent, articulate, and deeply proactive personal AI assistant for {user_name}.
 
 USER CONTEXT & LOCATION:
-• Location: India.
+• Current Location: {loc_str} (City: {user_loc.get('city', 'New Delhi')}, State: {user_loc.get('state', 'Delhi')}, Country: {user_loc.get('country', 'India')}).
 • Current Date & Time: {current_ist}.
 • Timezone: Indian Standard Time (IST, UTC+05:30). All dates, times, and deadlines must be referenced in IST.
-• Currency: Indian Rupees (INR / ₹) where financial figures arise.
+• Currency: Indian Rupees (INR / ₹) for all financial figures, pricing, and commodity inquiries.
 
 ACTIVE DYNAMIC SETTINGS:
 • User Name: {user_name}
 • Assistant Name: {assistant_name}
+• User City / Location: {loc_str}
 • Morning Briefing Time: {briefing_h}:{briefing_m} IST
 • Meeting Warning Window: {alert_mins} minutes in advance
 
 PROACTIVE ADVISOR PROTOCOL:
-• Do not just give bare facts or passive answers. Act as an executive Chief of Staff.
-• If {user_name} asks about an email, meeting, or event, proactively analyze what they might need:
-  - Mention implied deadlines or urgency.
-  - Suggest strategic, well-reasoned next steps (e.g., "Would you like me to draft a response, set an urgent reminder, or block 30 minutes on your calendar for this, Sir?").
-  - Provide value-added context that empowers informed decision-making.
+• Do not just provide bare factual answers or passive acknowledgments. Act as an executive Chief of Staff.
+• Always consider the user's local Indian context, city, and environment automatically without them having to ask.
+• If asked for commodity rates (gold, silver, fuel):
+  - Give exact live rates from the real-time search context in INR (₹). Never reply with vague estimates or say you don't know if search context is present.
+  - Break down rates clearly: 24 Karat (99.9% pure / investment grade) and 22 Karat (91.6% hallmarked jewelry standard) per gram and per 10 grams (tola).
+  - Include proactive decision context: e.g., GST (3%), making charge ranges (8-16%), and recent price trend considerations.
+• If asked about emails, calendar, or tasks:
+  - Identify impending deadlines or urgency.
+  - Suggest strategic, concrete next steps (e.g. "Would you like me to draft a quick reply, block focus time, or set a reminder, Sir?").
 
-AUTONOMOUS CONFIGURATION & SELF-EVOLUTION:
+AUTONOMOUS SELF-EVOLUTION & DYNAMIC SETTINGS:
 • You possess the capability to update your own settings and evolve your behavior directly.
-• If {user_name} asks to change a setting (e.g., briefing time, how to address them, alert window), confirm that the change has been applied immediately to your configuration.
-• If {user_name} says "From now on remember this...", "Remember my preference...", or gives critical feedback, acknowledge and permanently adopt that instruction.
+• If {user_name} says "From now on remember...", "Remember my preference...", or gives feedback, acknowledge and permanently adopt that instruction.
+• If {user_name} asks to change location, name, briefing time, voice, or alert window, confirm the update immediately.
 • All learned rules below are permanently active:
 {learnings_block}
 
@@ -84,9 +96,27 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
 """
 
     def ask(self, prompt: str, context: str = "") -> str:
-        """Sends a prompt to Gemini with Indian context, learned memory, multi-turn history, and proactive insights."""
+        """Sends a prompt to Gemini with real-time web search, Indian context, learned memory, and proactive insights."""
         if not self.api_key:
             return "Sir, the Gemini API key is missing. Please configure GEMINI_API_KEY in your .env file."
+
+        # Detect conversational location changes
+        self.location_manager.detect_and_handle_location_change(prompt)
+        user_loc = self.location_manager.get_user_location()
+
+        # Real-time Web Search Intelligence
+        web_search_context = ""
+        if self.search_engine.should_search_web(prompt):
+            search_query = self.search_engine.build_search_query(prompt, user_loc)
+            try:
+                results = self.search_engine.search_web(search_query, max_results=4)
+                if results:
+                    web_search_context = (
+                        f"Real-Time Internet Search Data (Retrieved for: '{search_query}', Location: {user_loc['display']}):\n"
+                        f"{self.search_engine.format_search_results(results)}\n"
+                    )
+            except Exception as e:
+                print(f"[-] Search query '{search_query}' failed: {e}")
 
         system_instruction = self._build_system_instruction()
         recent_history = self.memory.get_recent_history(limit=6)
@@ -100,6 +130,9 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                 full_prompt += f"{speaker}: {turn['message']}\n"
             full_prompt += "\n"
 
+        if web_search_context:
+            full_prompt += f"Live Real-Time Web Intelligence:\n{web_search_context}\n"
+
         if context:
             full_prompt += f"Live Real-Time Data (Calendar / Emails / Tasks):\n{context}\n\n"
 
@@ -112,8 +145,8 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                 }
             ],
             "generationConfig": {
-                "temperature": 0.6,
-                "maxOutputTokens": 900
+                "temperature": 0.5,
+                "maxOutputTokens": 950
             }
         }
 
@@ -171,6 +204,12 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
             self.memory.set_setting("briefing_hour", str(hour), "Morning briefing hour")
             self.memory.set_setting("briefing_minute", str(minute), "Morning briefing minute")
 
+        # Meeting alert window change
+        alert_match = re.search(r'(?:alert|warn|meeting notice)\s+(?:me\s+)?(\d{1,3})\s*(?:minutes?|mins?)', lower)
+        if alert_match:
+            mins = alert_match.group(1)
+            self.memory.set_setting("meeting_alert_minutes", mins, "Advance meeting warning window")
+
         # Name change
         name_match = re.search(r'(?:call me|my name is|address me as)\s+([a-zA-Z0-9_\- ]+)', lower)
         if name_match:
@@ -201,7 +240,8 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
         lower = user_prompt.lower()
         triggers = [
             "i prefer", "always ", "remember that", "from now on", "my name is",
-            "i am in", "i live in", "my work", "don't call me", "i like ", "never "
+            "i am in", "i live in", "my work", "don't call me", "i like ", "never ",
+            "remember this preference", "note that i"
         ]
         if any(t in lower for t in triggers):
             # Fast extraction via prompt

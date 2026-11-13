@@ -21,3 +21,6 @@ venv/
 temp_audio/
 *.mp3
 *.wav
+
+# Scratch scripts
+scratch/
