@@ -89,6 +89,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• `/tasks` → View your task list.\n"
         f"• `/note <text>` → Save a note to long-term memory.\n"
         f"• `/settings` → Inspect and customize dynamic preferences.\n"
+        f"• `/voice_model` → Switch voice (Prabhat Indian 🇮🇳, Brian Global 🌐, Neerja Female 🇮🇳).\n"
         f"• `/status` → Inspect system diagnostics & status."
     )
     await send_safe_html_reply(update, welcome)
@@ -387,6 +388,44 @@ async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"• #{t['id']}: {t['title']}{urgency}{due}\n"
     await update.message.reply_text(msg, parse_mode="Markdown")
 
+async def voice_model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Allows inspecting and selecting neural voice models."""
+    if not is_authorized(update):
+        return
+    arg = context.args[0].lower() if context.args else ""
+    voice_map = {
+        "prabhat": ("en-IN-PrabhatNeural", "Prabhat (Indian English Male 🇮🇳)"),
+        "brian": ("en-US-BrianNeural", "Brian (Articulate Global Male 🌐)"),
+        "neerja": ("en-IN-NeerjaNeural", "Neerja (Indian English Female 🇮🇳)"),
+        "christopher": ("en-US-ChristopherNeural", "Christopher (Deep US Male 🇺🇸)"),
+        "ryan": ("en-GB-RyanNeural", "Ryan (British Male 🇬🇧)")
+    }
+    if arg in voice_map:
+        v_id, v_label = voice_map[arg]
+        memory.set_setting("voice_name", v_id, "Selected neural voice")
+        await send_safe_html_reply(update, f"🎙️ <b>Voice Model Updated:</b> Switched to <b>{v_label}</b>.")
+        try:
+            sample_audio = await generate_speech_file(
+                f"Voice updated, Sir. I am now speaking in {v_label}.",
+                filename="sample_voice.mp3",
+                voice=v_id
+            )
+            with open(sample_audio, "rb") as audio:
+                await update.message.reply_voice(voice=audio, caption=f"Sample: {v_label}")
+        except Exception as e:
+            logger.warning(f"Failed to send voice sample: {e}")
+    else:
+        current = memory.get_setting("voice_name", "en-IN-PrabhatNeural")
+        msg = "🎙️ <b>Available Neural Voice Models:</b>\n\n"
+        msg += "• <code>/voice_model prabhat</code> → Indian English Male 🇮🇳 (Recommended)\n"
+        msg += "• <code>/voice_model brian</code> → Calm, Intelligent Global Male 🌐\n"
+        msg += "• <code>/voice_model neerja</code> → Indian English Female 🇮🇳\n"
+        msg += "• <code>/voice_model christopher</code> → Deep, Smooth US Male 🇺🇸\n"
+        msg += "• <code>/voice_model ryan</code> → British Male 🇬🇧\n\n"
+        msg += f"<b>Active Voice:</b> <code>{current}</code>\n"
+        msg += "<i>Usage: <code>/voice_model brian</code> or tell me in chat 'Change voice to Brian'</i>"
+        await send_safe_html_reply(update, msg)
+
 from telegram.request import HTTPXRequest
 from aiohttp import web
 
@@ -438,6 +477,7 @@ def build_telegram_application():
     app.add_handler(CommandHandler("briefing", briefing_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("settings", settings_command))
+    app.add_handler(CommandHandler("voice_model", voice_model_command))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_voice_message))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
     return app

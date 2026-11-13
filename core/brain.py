@@ -178,6 +178,24 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
             if len(new_name) < 30 and "jarvis" not in new_name.lower():
                 self.memory.set_setting("user_name", new_name, "User display name")
 
+        # Voice model change
+        voice_map = {
+            "prabhat": "en-IN-PrabhatNeural",
+            "indian male": "en-IN-PrabhatNeural",
+            "indian": "en-IN-PrabhatNeural",
+            "brian": "en-US-BrianNeural",
+            "american male": "en-US-BrianNeural",
+            "neerja": "en-IN-NeerjaNeural",
+            "indian female": "en-IN-NeerjaNeural",
+            "female": "en-IN-NeerjaNeural",
+            "christopher": "en-US-ChristopherNeural",
+            "ryan": "en-GB-RyanNeural"
+        }
+        for trigger, v_name in voice_map.items():
+            if f"voice to {trigger}" in lower or f"voice as {trigger}" in lower or f"switch to {trigger}" in lower:
+                self.memory.set_setting("voice_name", v_name, "Active neural voice model")
+                break
+
     def _extract_learnings_if_present(self, user_prompt: str):
         """Detects if user shared a preference or correction and saves it to continuous learning memory."""
         lower = user_prompt.lower()
