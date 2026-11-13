@@ -41,7 +41,87 @@ class MemoryManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Continuous Learning & User Personalization table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_learnings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL, -- preference, habit, fact, context, correction
+                    fact TEXT NOT NULL UNIQUE,
+                    confidence REAL DEFAULT 1.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # Conversation History for multi-turn conversational context
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS conversation_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role TEXT NOT NULL, -- user, assistant
+                    message TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             conn.commit()
+
+        # Seed initial permanent baseline learnings if table is fresh
+        self._seed_baseline_learnings()
+
+    def _seed_baseline_learnings(self):
+        baselines = [
+            ("User is located in India (Timezone: Asia/Kolkata / IST, Currency: INR / ₹). Always present schedules, times, and cultural context in IST.", "context"),
+            ("Format text messages cleanly and visually: use rich headers, bullets, and emojis; avoid raw markdown asterisks in output.", "preference"),
+            ("Proactive Advisor: Provide proactive insights, decision-support context, and recommended next steps beyond raw factual answers.", "preference"),
+            ("Continuous Learning: Actively adapt and update assistant behavior based on user feedback, corrections, and iterations.", "habit")
+        ]
+        for fact, cat in baselines:
+            self.add_learning(fact, cat)
+
+    def add_learning(self, fact: str, category: str = "preference"):
+        """Stores a persistent user preference, fact, or correction."""
+        fact = fact.strip()
+        if not fact:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO user_learnings (category, fact, updated_at) 
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(fact) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+            """, (category, fact))
+            conn.commit()
+
+    def get_learnings(self, limit: int = 25) -> List[str]:
+        """Returns list of all active user learnings and preferences."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT fact FROM user_learnings ORDER BY updated_at DESC LIMIT ?",
+                (limit,)
+            )
+            return [row[0] for row in cursor.fetchall()]
+
+    def log_conversation(self, role: str, message: str):
+        """Records a user or assistant message to conversation history."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO conversation_history (role, message) VALUES (?, ?)",
+                (role, message)
+            )
+            conn.commit()
+
+    def get_recent_history(self, limit: int = 6) -> List[Dict[str, str]]:
+        """Returns the most recent multi-turn conversation exchanges."""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT role, message FROM conversation_history ORDER BY id DESC LIMIT ?",
+                (limit,)
+            )
+            rows = cursor.fetchall()
+            # Return in chronological order
+            return [{"role": r["role"], "message": r["message"]} for r in reversed(rows)]
 
     def add_task(self, title: str, due_date: Optional[str] = None, is_urgent: bool = False) -> int:
         with self._get_connection() as conn:

@@ -2,6 +2,8 @@ import asyncio
 import logging
 import os
 import sys
+import html
+import re
 from pathlib import Path
 
 # Ensure project root is in sys.path
@@ -88,7 +90,60 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• `/note <text>` → Save a note to long-term memory.\n"
         f"• `/status` → Inspect system diagnostics & status."
     )
-    await update.message.reply_text(welcome, parse_mode="Markdown")
+    await send_safe_html_reply(update, welcome)
+
+def format_to_telegram_html(text: str) -> str:
+    """Converts CommonMark markdown into clean, beautiful, safe Telegram HTML."""
+    if not text:
+        return ""
+
+    # Protect code blocks
+    code_blocks = []
+    def save_code_block(match):
+        code_blocks.append(match.group(1))
+        return f"%%CODE_BLOCK_{len(code_blocks)-1}%%"
+    text = re.sub(r'```(?:[a-zA-Z0-9_-]+)?\n?(.*?)```', save_code_block, text, flags=re.DOTALL)
+
+    inline_codes = []
+    def save_inline_code(match):
+        inline_codes.append(match.group(1))
+        return f"%%INLINE_CODE_{len(inline_codes)-1}%%"
+    text = re.sub(r'`([^`]+)`', save_inline_code, text)
+
+    # Escape HTML special characters
+    text = html.escape(text)
+
+    # Convert headers (# Header) to bold
+    text = re.sub(r'^(?:#{1,3})\s*(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+
+    # Convert **bold** or __bold__ to <b>...</b>
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
+
+    # Convert *italic* or _italic_ to <i>...</i>
+    text = re.sub(r'(?<!\w)\*(.+?)\*(?!\w)', r'<i>\1</i>', text)
+    text = re.sub(r'(?<!\w)_(.+?)_(?!\w)', r'<i>\1</i>', text)
+
+    # Bullet lists: normalize "- " or "* " to clean unicode bullet "• "
+    text = re.sub(r'^\s*[-*]\s+', '• ', text, flags=re.MULTILINE)
+
+    for i, code in enumerate(code_blocks):
+        escaped_code = html.escape(code.strip())
+        text = text.replace(f"%%CODE_BLOCK_{i}%%", f"<pre>{escaped_code}</pre>")
+    for i, code in enumerate(inline_codes):
+        escaped_code = html.escape(code)
+        text = text.replace(f"%%INLINE_CODE_{i}%%", f"<code>{escaped_code}</code>")
+
+    return text
+
+async def send_safe_html_reply(update: Update, text: str):
+    """Sends a message using clean Telegram HTML with safe plain-text fallback."""
+    formatted = format_to_telegram_html(text)
+    try:
+        await update.message.reply_text(formatted, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"HTML parse failed ({e}), sending plain text.")
+        await update.message.reply_text(text)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
@@ -101,7 +156,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context_data = await asyncio.to_thread(get_context_for_query, user_text)
     reply = await asyncio.to_thread(brain.ask, user_text, context_data)
 
-    await update.message.reply_text(reply)
+    await send_safe_html_reply(update, reply)
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Processes incoming Telegram voice notes and audio files with Gemini speech-to-text and voice reply."""
@@ -175,7 +230,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.warning(f"TTS voice synthesis timed out or failed ({tts_err}), responding in text.")
 
         if not audio_sent:
-            await update.message.reply_text(f"🗣️ *\"{transcribed_text}\"*\n\n{reply}")
+            await send_safe_html_reply(update, f"🗣️ <i>\"{transcribed_text}\"</i>\n\n{reply}")
 
     except Exception as e:
         logger.error(f"[-] Error processing incoming voice/audio message: {e}", exc_info=True)
@@ -194,10 +249,10 @@ async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         audio_path = await generate_speech_file(clean_spoken[:500], filename=f"briefing_{update.message.id}.mp3")
         with open(audio_path, "rb") as audio:
-            await update.message.reply_voice(voice=audio, caption=briefing_text[:1024], parse_mode="Markdown")
+            await update.message.reply_voice(voice=audio, caption=briefing_text[:1024])
     except Exception as e:
         logger.error(f"[-] Voice synthesis failed for briefing: {e}")
-        await update.message.reply_text(briefing_text, parse_mode="Markdown")
+        await send_safe_html_reply(update, briefing_text)
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays system status diagnostics."""
@@ -210,33 +265,34 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         f"🛡️ **{config.ASSISTANT_NAME} System Diagnostics:**\n\n"
         f"• **Cognitive Engine (Gemini)**: {gemini_status}\n"
+        f"• **Location Context**: 🇮🇳 India (IST, UTC+05:30)\n"
         f"• **Vocal Synthesis (Edge-TTS)**: 🟢 Active (en-GB-RyanNeural)\n"
-        f"• **Voice Recognition**: 🟢 Multimodal Audio Active\n"
+        f"• **Continuous Learning**: 🟢 Active ({len(memory.get_learnings())} rules stored)\n"
         f"• **Google Workspace**: {cal_status}\n"
         f"• **Autonomous Scheduler**: 🟢 Active (Briefings & Guardians)\n"
         f"• **Memory Database**: 🟢 Connected ({tasks_count} pending tasks)\n"
         f"• **Primary User ID**: `{config.TELEGRAM_USER_ID or 'Not Set'}`"
     )
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await send_safe_html_reply(update, msg)
 
 async def agenda_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
     if not google.is_configured():
         await update.message.reply_text(
-            "⚠️ Google Calendar is not yet linked, Sir.\nPlease add credentials.json to enable calendar syncing."
+            "⚠️ Google Calendar is not yet linked, Sir."
         )
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     agenda = await asyncio.to_thread(google.format_daily_agenda)
-    await update.message.reply_text(f"📅 **Calendar Agenda:**\n{agenda}")
+    await send_safe_html_reply(update, agenda)
 
 async def emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
     if not google.is_configured():
         await update.message.reply_text(
-            "⚠️ Gmail is not yet linked, Sir.\nPlease add credentials.json to enable email syncing."
+            "⚠️ Gmail is not yet linked, Sir."
         )
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -244,10 +300,10 @@ async def emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not emails:
         await update.message.reply_text("📭 Inbox zero! You have no unread emails, Sir.")
         return
-    msg = f"📬 **Unread Emails ({len(emails)}):**\n\n"
+    msg = f"📬 **Recent Unread Emails ({len(emails)}):**\n\n"
     for em in emails:
-        msg += f"• **From:** {em['from']}\n  **Subject:** {em['subject']}\n  _{em['snippet'][:100]}..._\n\n"
-    await update.message.reply_text(msg, parse_mode="Markdown")
+        msg += f"• **From:** {em['from']}\n  **Subject:** {em['subject']}\n  _{em['snippet'][:120]}..._\n\n"
+    await send_safe_html_reply(update, msg)
 
 async def handle_voice_reply_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):

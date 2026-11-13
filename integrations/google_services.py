@@ -11,6 +11,22 @@ from typing import List, Dict, Any, Optional
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TOKEN_FILE = PROJECT_ROOT / "token.json"
 
+def format_iso_to_ist(iso_str: str) -> str:
+    """Converts UTC/ISO date string to Indian Standard Time (IST) format."""
+    if not iso_str:
+        return ""
+    try:
+        if len(iso_str) == 10 and "-" in iso_str and "T" not in iso_str:
+            dt = datetime.date.fromisoformat(iso_str)
+            return dt.strftime("%A, %d %b %Y")
+        clean_iso = iso_str.replace("Z", "+00:00")
+        dt = datetime.datetime.fromisoformat(clean_iso)
+        ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        dt_ist = dt.astimezone(ist_tz)
+        return dt_ist.strftime("%d %b, %I:%M %p IST")
+    except Exception:
+        return iso_str
+
 class GoogleServices:
     """Fast, direct HTTP integration for Google Calendar and Gmail with auto-refresh."""
 
@@ -171,9 +187,10 @@ class GoogleServices:
         events = self.get_upcoming_events(max_results=5)
         if not events:
             return "You have no upcoming events scheduled on your calendar, Sir."
-        lines = ["Here is your upcoming schedule, Sir:"]
+        lines = ["📅 **Upcoming Schedule (IST):**"]
         for ev in events:
-            lines.append(f"• {ev['summary']} (at {ev['start']})")
+            ist_time = format_iso_to_ist(ev.get("start", ""))
+            lines.append(f"• **{ev['summary']}** ({ist_time})")
         return "\n".join(lines)
 
     def create_event(
