@@ -4,6 +4,7 @@ import os
 import sys
 import html
 import re
+import datetime
 from pathlib import Path
 
 # Ensure project root is in sys.path
@@ -11,7 +12,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from telegram import Update
+from telegram import (
+    Update,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -104,14 +110,24 @@ def format_to_telegram_html(text: str) -> str:
 
     return text
 
-async def send_safe_html_reply(update: Update, text: str):
+async def send_safe_html_reply(update: Update, text: str, reply_markup=None):
     """Sends a message using clean Telegram HTML with safe plain-text fallback."""
     formatted = format_to_telegram_html(text)
     try:
-        await update.message.reply_text(formatted, parse_mode="HTML")
+        await update.message.reply_text(formatted, parse_mode="HTML", reply_markup=reply_markup)
     except Exception as e:
         logger.warning(f"HTML parse failed ({e}), sending plain text.")
-        await update.message.reply_text(text)
+        await update.message.reply_text(text, reply_markup=reply_markup)
+
+def check_daily_first_interaction() -> bool:
+    """Checks if this is the user's first conversation turn today in IST."""
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    today_str = datetime.datetime.now(ist_tz).strftime("%Y-%m-%d")
+    last_date = memory.get_setting("last_interaction_date", "")
+    if last_date != today_str:
+        memory.set_setting("last_interaction_date", today_str, "Date of last user conversation in IST")
+        return True
+    return False
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -160,10 +176,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
+    is_first_today = check_daily_first_interaction()
+
     context_data = await asyncio.to_thread(get_context_for_query, user_text)
     reply = await asyncio.to_thread(brain.ask, user_text, context_data)
 
-    await send_safe_html_reply(update, reply)
+    reply_markup = None
+    if is_first_today:
+        loc = brain.location_manager.get_user_location()
+        reply += f"\n\n📍 <i>Active Location: <b>{loc['display']}</b>. (Tap below if you've moved today).</i>"
+        loc_btn = KeyboardButton(text="📍 Tap to Update Location for Today", request_location=True)
+        reply_markup = ReplyKeyboardMarkup([[loc_btn]], resize_keyboard=True, one_time_keyboard=True)
+
+    await send_safe_html_reply(update, reply, reply_markup=reply_markup)
 
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles Telegram location pin sharing and calibrates regional location."""
@@ -185,7 +210,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <b>Country:</b> {loc_data.get('country')}\n\n"
         f"<i>All real-time gold rates, commodity prices, weather, and localized intelligence are now calibrated to {loc_data.get('display')}, Sir.</i>"
     )
-    await send_safe_html_reply(update, reply)
+    await send_safe_html_reply(update, reply, reply_markup=ReplyKeyboardRemove())
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Processes incoming Telegram voice notes and audio files with Gemini speech-to-text and voice reply."""
@@ -353,6 +378,19 @@ async def handle_voice_reply_request(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_voice(voice=audio, caption=short_cap, parse_mode="HTML")
         await send_safe_html_reply(update, reply)
 
+async def locate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sends a one-tap button to instantly update location via GPS."""
+    if not is_authorized(update):
+        return
+    loc = brain.location_manager.get_user_location()
+    loc_btn = KeyboardButton(text="📍 Tap to Share Live Location", request_location=True)
+    kb = ReplyKeyboardMarkup([[loc_btn]], resize_keyboard=True, one_time_keyboard=True)
+    msg = (
+        f"📍 <b>Current Calibrated Location:</b> <code>{loc['display']}</code>\n\n"
+        f"Tap the button below on your phone to instantly send your GPS coordinates to Jarvis:"
+    )
+    await send_safe_html_reply(update, msg, reply_markup=kb)
+
 async def location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Allows checking or manually setting user location."""
     if not is_authorized(update):
@@ -365,18 +403,20 @@ async def location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_safe_html_reply(update, msg)
     else:
         current = brain.location_manager.get_user_location()
+        loc_btn = KeyboardButton(text="📍 Tap to Update Location", request_location=True)
+        kb = ReplyKeyboardMarkup([[loc_btn]], resize_keyboard=True, one_time_keyboard=True)
         msg = (
             f"📍 <b>Current Calibrated Location:</b>\n"
             f"• <b>Location:</b> <code>{current['display']}</code>\n"
             f"• <b>City:</b> {current['city']}\n"
             f"• <b>State:</b> {current['state']}\n"
             f"• <b>Country:</b> {current['country']}\n\n"
-            f"<i>To change your location:</i>\n"
-            f"• Send a location pin directly in this chat, or\n"
+            f"<i>To update your location:</i>\n"
+            f"• Tap the button below to send your live GPS pin, or\n"
             f"• Type <code>/location &lt;City Name&gt;</code> (e.g. <code>/location Mumbai</code>), or\n"
             f"• Simply tell me: <i>\"I am in Bengaluru\"</i>."
         )
-        await send_safe_html_reply(update, msg)
+        await send_safe_html_reply(update, msg, reply_markup=kb)
 
 async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
@@ -535,6 +575,7 @@ def build_telegram_application():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("settings", settings_command))
     app.add_handler(CommandHandler("location", location_command))
+    app.add_handler(CommandHandler("locate", locate_command))
     app.add_handler(CommandHandler("voice_model", voice_model_command))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_voice_message))
