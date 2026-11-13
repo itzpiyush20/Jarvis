@@ -33,11 +33,17 @@ class JarvisBrain:
 
     def _build_system_instruction(self) -> str:
         current_ist = self._get_current_ist_string()
-        learnings = self.memory.get_learnings(20)
+        user_name = self.memory.get_setting("user_name", config.USER_NAME)
+        assistant_name = self.memory.get_setting("assistant_name", config.ASSISTANT_NAME)
+        briefing_h = self.memory.get_setting("briefing_hour", "8")
+        briefing_m = self.memory.get_setting("briefing_minute", "0").zfill(2)
+        alert_mins = self.memory.get_setting("meeting_alert_minutes", "15")
+
+        learnings = self.memory.get_learnings(25)
         learnings_block = "\n".join(f"• {item}" for item in learnings) if learnings else "• None recorded yet."
 
         return f"""
-You are {config.ASSISTANT_NAME}, an elite, ultra-competent, articulate, and deeply proactive personal AI assistant for {config.USER_NAME}.
+You are {assistant_name}, an elite, ultra-competent, articulate, and deeply proactive personal AI assistant for {user_name}.
 
 USER CONTEXT & LOCATION:
 • Location: India.
@@ -45,17 +51,25 @@ USER CONTEXT & LOCATION:
 • Timezone: Indian Standard Time (IST, UTC+05:30). All dates, times, and deadlines must be referenced in IST.
 • Currency: Indian Rupees (INR / ₹) where financial figures arise.
 
+ACTIVE DYNAMIC SETTINGS:
+• User Name: {user_name}
+• Assistant Name: {assistant_name}
+• Morning Briefing Time: {briefing_h}:{briefing_m} IST
+• Meeting Warning Window: {alert_mins} minutes in advance
+
 PROACTIVE ADVISOR PROTOCOL:
 • Do not just give bare facts or passive answers. Act as an executive Chief of Staff.
-• If {config.USER_NAME} asks about an email, meeting, or event, proactively analyze what they might need:
+• If {user_name} asks about an email, meeting, or event, proactively analyze what they might need:
   - Mention implied deadlines or urgency.
   - Suggest strategic, well-reasoned next steps (e.g., "Would you like me to draft a response, set an urgent reminder, or block 30 minutes on your calendar for this, Sir?").
   - Provide value-added context that empowers informed decision-making.
 
-CONTINUOUS LEARNING & PERSONALIZATION:
-• You must strictly adhere to the user's learned preferences and habits:
+AUTONOMOUS CONFIGURATION & SELF-EVOLUTION:
+• You possess the capability to update your own settings and evolve your behavior directly.
+• If {user_name} asks to change a setting (e.g., briefing time, how to address them, alert window), confirm that the change has been applied immediately to your configuration.
+• If {user_name} says "From now on remember this...", "Remember my preference...", or gives critical feedback, acknowledge and permanently adopt that instruction.
+• All learned rules below are permanently active:
 {learnings_block}
-• If {config.USER_NAME} specifies a preference, correction, or personal habit, adopt it immediately.
 
 FORMATTING & TYPOGRAPHY:
 • Format responses cleanly for mobile Telegram reading.
@@ -129,15 +143,40 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
         if not reply_text:
             reply_text = f"Apologies, Sir. Cognitive processing was momentarily interrupted ({last_error}). Please try again."
 
-        # Record conversation into SQLite history
+        # Record conversation into SQLite history and update settings/learnings
         try:
             self.memory.log_conversation("user", prompt)
             self.memory.log_conversation("assistant", reply_text)
+            self._handle_setting_updates(prompt)
             self._extract_learnings_if_present(prompt)
         except Exception:
             pass
 
         return reply_text
+
+    def _handle_setting_updates(self, prompt: str):
+        """Interprets and executes dynamic settings changes directly from conversation."""
+        lower = prompt.lower()
+
+        # Briefing time change
+        time_match = re.search(r'(?:briefing|brief)\s+(?:at|to|time)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?', lower)
+        if time_match:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2) or 0)
+            meridiem = time_match.group(3)
+            if meridiem == "pm" and hour < 12:
+                hour += 12
+            elif meridiem == "am" and hour == 12:
+                hour = 0
+            self.memory.set_setting("briefing_hour", str(hour), "Morning briefing hour")
+            self.memory.set_setting("briefing_minute", str(minute), "Morning briefing minute")
+
+        # Name change
+        name_match = re.search(r'(?:call me|my name is|address me as)\s+([a-zA-Z0-9_\- ]+)', lower)
+        if name_match:
+            new_name = name_match.group(1).strip().capitalize()
+            if len(new_name) < 30 and "jarvis" not in new_name.lower():
+                self.memory.set_setting("user_name", new_name, "User display name")
 
     def _extract_learnings_if_present(self, user_prompt: str):
         """Detects if user shared a preference or correction and saves it to continuous learning memory."""

@@ -157,8 +157,9 @@ class JarvisScheduler:
                     if ev_dt.tzinfo is None:
                         ev_dt = ev_dt.replace(tzinfo=datetime.timezone.utc)
                     delta_seconds = (ev_dt - now).total_seconds()
-                    # Alert if meeting starts between 0 and 15 minutes from now
-                    if 0 <= delta_seconds <= 900:
+                    alert_window = int(self.memory.get_setting("meeting_alert_minutes", "15")) * 60
+                    # Alert if meeting starts between 0 and alert_window seconds from now
+                    if 0 <= delta_seconds <= alert_window:
                         mins_left = max(1, int(delta_seconds // 60))
                         msg = (
                             f"🔔 **Upcoming Meeting in ~{mins_left} minutes!**\n"
@@ -206,9 +207,11 @@ class JarvisScheduler:
             try:
                 now = datetime.datetime.now()
 
-                # 1. Morning briefing trigger (once per day)
-                if (now.hour == self.briefing_hour and
-                    now.minute >= self.briefing_minute and
+                # 1. Morning briefing trigger (once per day, dynamically configured)
+                briefing_h = int(self.memory.get_setting("briefing_hour", "8"))
+                briefing_m = int(self.memory.get_setting("briefing_minute", "0"))
+                if (now.hour == briefing_h and
+                    now.minute >= briefing_m and
                     self._last_briefing_date != now.date()):
                     self._last_briefing_date = now.date()
                     logger.info("[*] Delivering automated morning briefing...")

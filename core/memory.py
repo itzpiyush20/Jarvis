@@ -61,10 +61,60 @@ class MemoryManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Dynamic Assistant Settings table (User configurable via Telegram)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS assistant_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    description TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             conn.commit()
 
         # Seed initial permanent baseline learnings if table is fresh
         self._seed_baseline_learnings()
+        self._seed_default_settings()
+
+    def _seed_default_settings(self):
+        defaults = {
+            "briefing_hour": ("8", "Hour of morning briefing in 24h format"),
+            "briefing_minute": ("0", "Minute of morning briefing"),
+            "meeting_alert_minutes": ("15", "Advance notice for calendar meetings in minutes"),
+            "assistant_name": ("Jarvis", "Name of the assistant"),
+            "user_name": ("Sir", "How the assistant addresses the user"),
+            "voice_name": ("en-GB-RyanNeural", "Voice model for spoken responses"),
+            "language": ("en-IN", "Primary regional language context")
+        }
+        for k, (v, desc) in defaults.items():
+            if not self.get_setting(k):
+                self.set_setting(k, v, desc)
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        """Retrieves a dynamic configuration setting."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM assistant_settings WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row[0] if row else default
+
+    def set_setting(self, key: str, value: str, description: str = ""):
+        """Sets or updates a dynamic configuration setting."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO assistant_settings (key, value, description, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+            """, (key, str(value), description))
+            conn.commit()
+
+    def get_all_settings(self) -> Dict[str, str]:
+        """Returns all current dynamic settings."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT key, value FROM assistant_settings")
+            return dict(cursor.fetchall())
 
     def _seed_baseline_learnings(self):
         baselines = [

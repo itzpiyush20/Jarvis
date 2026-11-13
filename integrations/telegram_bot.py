@@ -88,6 +88,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• `/alert <urgent message>` → Trigger an immediate priority voice alarm.\n"
         f"• `/tasks` → View your task list.\n"
         f"• `/note <text>` → Save a note to long-term memory.\n"
+        f"• `/settings` → Inspect and customize dynamic preferences.\n"
         f"• `/status` → Inspect system diagnostics & status."
     )
     await send_safe_html_reply(update, welcome)
@@ -344,6 +345,34 @@ async def note_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     note_id = await asyncio.to_thread(memory.add_note, note_text)
     await update.message.reply_text(f"📝 Note saved (ID #{note_id}):\n_{note_text}_", parse_mode="Markdown")
 
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays current dynamic configuration and explains how to update settings in chat."""
+    if not is_authorized(update):
+        return
+    settings = memory.get_all_settings()
+    learnings = memory.get_learnings(10)
+
+    u_name = settings.get("user_name", "Sir")
+    a_name = settings.get("assistant_name", "Jarvis")
+    b_hour = settings.get("briefing_hour", "8")
+    b_min = settings.get("briefing_minute", "0").zfill(2)
+    notice = settings.get("meeting_alert_minutes", "15")
+
+    msg = f"⚙️ **{a_name} Dynamic Configuration:**\n\n"
+    msg += f"• **Your Name**: `{u_name}`\n"
+    msg += f"• **Morning Briefing**: `{b_hour}:{b_min} IST`\n"
+    msg += f"• **Meeting Notice Window**: `{notice} minutes`\n"
+    msg += f"• **Timezone**: `Asia/Kolkata (IST)`\n\n"
+
+    if learnings:
+        msg += f"🧠 **Learned Rules & Preferences ({len(learnings)} active):**\n"
+        for l in learnings[:4]:
+            msg += f"• _{l}_\n"
+        msg += "\n"
+
+    msg += "💡 *To change any setting or add a rule, simply tell me in plain English! (e.g. 'Set briefing to 7:00 AM', 'Call me Piyush', or 'From now on always...')*"
+    await send_safe_html_reply(update, msg)
+
 async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
@@ -408,6 +437,7 @@ def build_telegram_application():
     app.add_handler(CommandHandler("tasks", tasks_command))
     app.add_handler(CommandHandler("briefing", briefing_command))
     app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("settings", settings_command))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_voice_message))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
     return app
