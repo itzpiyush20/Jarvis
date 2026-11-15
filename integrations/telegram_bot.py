@@ -265,7 +265,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             audio_path = await asyncio.wait_for(
                 generate_speech_file(reply, filename=f"reply_voice_{update.message.id}.mp3"),
-                timeout=12.0
+                timeout=25.0
             )
             caption = f"🗣️ <i>\"{html.escape(transcribed_text)}\"</i>\n\n{reply}"
             html_caption = format_to_telegram_html(caption)

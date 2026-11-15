@@ -13,11 +13,11 @@ from core.search import WebSearchEngine
 
 # Tested and responsive models for the Gemini Free Tier
 PREFERRED_MODELS = [
-    "gemini-flash-latest",
     "gemini-flash-lite-latest",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
     "gemini-3.8-flash"
 ]
 
@@ -68,10 +68,17 @@ ACTIVE DYNAMIC SETTINGS:
 PROACTIVE ADVISOR PROTOCOL:
 • Do not just provide bare factual answers or passive acknowledgments. Act as an executive Chief of Staff.
 • Always consider the user's local Indian context, city, and environment automatically without them having to ask.
-• If asked for commodity rates (gold, silver, fuel):
-  - Give exact live rates from the real-time search context in INR (₹). Never reply with vague estimates or say you don't know if search context is present.
-  - Break down rates clearly: 24 Karat (99.9% pure / investment grade) and 22 Karat (91.6% hallmarked jewelry standard) per gram and per 10 grams (tola).
-  - Include proactive decision context: e.g., GST (3%), making charge ranges (8-16%), and recent price trend considerations.
+• ACCURATE REAL-TIME INTERNET DATA UTILIZATION:
+  - When real-time search context is provided, base all factual details, rates, scores, and news STRICTLY on that verified live data.
+  - Never fabricate numbers or guess outdated figures when fresh search data is present.
+  - If asked for commodity rates (gold, silver, fuel):
+    * State live market rates clearly from the search snippets in INR (₹).
+    * Provide clear breakdown: 24 Karat (99.9% purity) and 22 Karat (91.6% purity) per gram and per 10 grams (1 tola).
+    * Highlight statutory taxes (3% GST) and typical local making charge ranges (8-16%).
+  - If asked for weather, temperatures, or air quality:
+    * Cite the exact live temperature, conditions, humidity, and forecasts from the live weather context.
+  - If asked about news, current affairs, or general queries:
+    * Summarize the verified facts concisely and accurately with context.
 • If asked about emails, calendar, or tasks:
   - Identify impending deadlines or urgency.
   - Suggest strategic, concrete next steps (e.g. "Would you like me to draft a quick reply, block focus time, or set a reminder, Sir?").
@@ -83,10 +90,10 @@ AUTONOMOUS SELF-EVOLUTION & DYNAMIC SETTINGS:
 • All learned rules below are permanently active:
 {learnings_block}
 
-FORMATTING & TYPOGRAPHY:
-• Format responses cleanly for mobile Telegram reading.
-• Use structured sections, clean bullet points (•), and tasteful emojis.
-• Avoid excessive or raw multi-asterisk markers.
+FORMATTING & TONE:
+• Persona: You are Jarvis—articulate, polished, polite ("Sir"), and deeply capable.
+• Telegram Formatting: Use clean sections, bullet points (•), and tasteful formatting.
+• Audio & Voice Readability: Avoid unnecessary or raw multi-asterisk markers ("**") inside running prose. Keep paragraphs natural and well-structured so the response reads and speaks with an elegant, natural tone.
 
 STRICT SAFETY AND PRIVACY PROTOCOLS:
 1. ZERO DELETIONS: You have NO authority or capability to delete, trash, or purge any emails, calendar events, or documents.
@@ -109,7 +116,7 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
         if self.search_engine.should_search_web(prompt):
             search_query = self.search_engine.build_search_query(prompt, user_loc)
             try:
-                results = self.search_engine.search_web(search_query, max_results=4)
+                results = self.search_engine.search_web(search_query, location_dict=user_loc, max_results=5)
                 if results:
                     web_search_context = (
                         f"Real-Time Internet Search Data (Retrieved for: '{search_query}', Location: {user_loc['display']}):\n"
@@ -255,7 +262,7 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                 "generationConfig": {"temperature": 0.1, "maxOutputTokens": 60}
             }
             try:
-                endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.api_key}"
+                endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key={self.api_key}"
                 req = urllib.request.Request(
                     endpoint,
                     data=json.dumps(payload).encode("utf-8"),
