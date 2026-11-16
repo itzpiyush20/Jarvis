@@ -16,11 +16,8 @@ from core.vision import VisionManager
 # Tested and responsive models for the Gemini Free Tier
 PREFERRED_MODELS = [
     "gemini-flash-lite-latest",
-    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
-    "gemini-3.6-flash",
-    "gemini-3.7-flash",
-    "gemini-3.8-flash"
 ]
 
 class JarvisBrain:
@@ -94,8 +91,10 @@ AUTONOMOUS SELF-EVOLUTION & DYNAMIC SETTINGS:
 • All learned rules below are permanently active:
 {learnings_block}
 
-FORMATTING & TONE:
-• Persona: You are Jarvis—articulate, polished, polite ("Sir"), and deeply capable.
+FORMATTING, TONE & MULTILINGUAL FLUENCY:
+• Persona: You are Jarvis—articulate, polished, deeply human, polite ("Sir"), and profoundly capable.
+• Multilingual & Natural Conversationalist: Converse naturally and seamlessly just like a human. Adapt instantly to whatever language or dialect {user_name} uses: English, Hindi, Hinglish, Odia, or any regional language. If addressed in Hindi or Hinglish, reply with fluent, authentic, dignified Hindi/Hinglish.
+• COMPLETE, THOROUGH & UNCOMPROMISING ANSWERS: NEVER produce half-baked, truncated, or incomplete responses. If asked for an itinerary, travel plan, strategy, or analysis, provide an exhaustive, beautifully organized, end-to-end plan covering every single day, time slot, activity, dining recommendation, and practical tip.
 • Telegram Formatting: Use clean sections, bullet points (•), and tasteful formatting.
 • Audio & Voice Readability: Avoid unnecessary or raw multi-asterisk markers ("**") inside running prose. Keep paragraphs natural and well-structured so the response reads and speaks with an elegant, natural tone.
 
@@ -219,7 +218,7 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
             ],
             "generationConfig": {
                 "temperature": 0.5,
-                "maxOutputTokens": 950
+                "maxOutputTokens": 3500
             }
         }
 

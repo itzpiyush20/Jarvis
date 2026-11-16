@@ -157,6 +157,7 @@ def speak_directly_sapi(text: str) -> bool:
         import pythoncom
         pythoncom.CoInitialize()
         speaker = win32com.client.Dispatch("SAPI.SpVoice")
+        speaker.Rate = 1  # Crisp, articulate, natural executive cadence
         clean_text = clean_text_for_speech(text)
         speaker.Speak(clean_text)
         return True

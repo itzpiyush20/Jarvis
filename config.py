@@ -20,15 +20,7 @@ if sys.stderr is None:
     except Exception:
         sys.stderr = open(os.devnull, "w")
 
-# ========================================================
-# NETWORK OPTIMIZATION: Force IPv4 DNS resolution
-# Bypasses the 45-second Windows TCP IPv6 timeout on Indian/home ISPs
-# Reduces response times from 50s down to 1s!
-# ========================================================
-_orig_getaddrinfo = socket.getaddrinfo
-def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
-socket.getaddrinfo = _ipv4_only_getaddrinfo
+# System socket uses standard dual-stack (IPv4/IPv6 Happy Eyeballs) resolution
 
 def load_env():
     """Loads .env file into os.environ with fallback if python-dotenv isn't installed."""
