@@ -87,6 +87,18 @@ class DesktopVoiceAssistant:
         )
         logger.info("[+] openWakeWord ONNX engine loaded successfully.")
 
+        # Pre-cache instant wake-word acknowledgment audio for zero-latency response
+        self.ack_audio_path = config.AUDIO_DIR / "jarvis_ack.mp3"
+        self._ensure_ack_audio()
+
+    def _ensure_ack_audio(self):
+        """Pre-synthesizes the instant verbal acknowledgment to avoid runtime TTS delay."""
+        if not self.ack_audio_path.exists():
+            try:
+                speak_to_file("At your service, Sir. How may I assist you?", filename="jarvis_ack.mp3")
+            except Exception:
+                pass
+
     def _audio_callback(self, indata, frames, time_info, status):
         """Streaming callback from sounddevice capturing 16-bit PCM chunks."""
         if status:
@@ -135,22 +147,22 @@ class DesktopVoiceAssistant:
 
         # Compute dynamic ambient noise floor from the first available frames
         sample_energies = [np.sqrt(np.mean(f.astype(np.float32) ** 2)) for f in recorded_frames if len(f) > 0]
-        ambient_baseline = np.mean(sample_energies) if sample_energies else 15.0
-        # Dynamic voice threshold: baseline * 1.3 or minimum 25.0
-        voice_threshold = max(ambient_baseline * 1.3, 25.0)
+        ambient_baseline = np.mean(sample_energies) if sample_energies else 2.0
+        # Dynamic voice threshold: baseline * 1.25 or minimum 8.0 for responsive soft-speech pickup
+        voice_threshold = max(ambient_baseline * 1.25, 8.0)
 
         logger.debug(f"Ambient baseline RMS: {ambient_baseline:.1f}, Voice threshold: {voice_threshold:.1f}")
 
         speech_started = False
         silent_chunks = 0
-        max_silent_chunks = int(1.3 / 0.08)  # ~1.3s silence after speech concludes command
-        timeout_chunks = int(5.0 / 0.08)     # 5.0s window for speech to begin
-        max_duration_chunks = int(14.0 / 0.08) # 14s maximum command limit
+        max_silent_chunks = int(0.75 / 0.08)  # ~750ms silence after speech concludes command
+        timeout_chunks = int(3.5 / 0.08)     # 3.5s window for speech to begin
+        max_duration_chunks = int(12.0 / 0.08) # 12s maximum command limit
         total_chunks = len(recorded_frames)
 
         while self.running and total_chunks < max_duration_chunks:
             try:
-                chunk = self.audio_queue.get(timeout=0.2)
+                chunk = self.audio_queue.get(timeout=0.15)
             except queue.Empty:
                 continue
 
@@ -175,7 +187,7 @@ class DesktopVoiceAssistant:
                         logger.info("⏱️ [TIMEOUT] Concluding audio capture.")
                         break
 
-        if len(recorded_frames) < 8:
+        if len(recorded_frames) < 6:
             return None
 
         # Concatenate PCM audio and wrap in WAV format
@@ -193,14 +205,22 @@ class DesktopVoiceAssistant:
         """Transcribes audio, queries Gemini brain, synthesizes speech, and plays response."""
         play_thinking_chime()
 
-        # 1. Transcribe audio using Gemini
+        # 1. Transcribe audio using Gemini Native Audio
         logger.info("🧠 [TRANSCRIBING] Transcribing speech via Gemini Native Audio...")
         transcription = self.brain.transcribe_audio(wav_bytes, mime_type="audio/wav")
-        clean_query = transcription.strip().strip('"\'')
+        clean_query = transcription.strip().strip('"\'') if transcription else ""
 
+        # If user just called "Jarvis" and paused, answer immediately with instant acknowledgment
         if not clean_query or len(clean_query) < 2:
-            logger.warning("[-] Could not discern clear speech from recording.")
-            notify_user("Jarvis", "No clear speech detected.")
+            logger.info("[*] Wake word acknowledged without further command. Responding with verbal greeting.")
+            if self.ack_audio_path.exists():
+                play_audio_file(self.ack_audio_path, blocking=True)
+            else:
+                try:
+                    audio_path = speak_to_file("At your service, Sir. How may I assist you?", filename="jarvis_ack.mp3")
+                    play_audio_file(audio_path, blocking=True)
+                except Exception as e:
+                    logger.error(f"[-] Acknowledgment playback error: {e}")
             return
 
         print(f"\n" + "—" * 60)
@@ -224,14 +244,15 @@ class DesktopVoiceAssistant:
             audio_path = speak_to_file(reply, filename=filename)
             
             # 4. Play speech through laptop speakers
-            logger.info(f"🔊 [SPEAKING] Playing response through speakers...")
-            play_audio_file(audio_path, blocking=True)
+            if audio_path.exists() and audio_path.stat().st_size > 500:
+                logger.info(f"🔊 [SPEAKING] Playing response through speakers...")
+                play_audio_file(audio_path, blocking=True)
             logger.info("[✓] Finished speaking.")
         except Exception as e:
             logger.error(f"[-] Speech playback error: {e}", exc_info=True)
 
     def listen_loop(self):
-        """Continuous wake-word listening loop."""
+        """Continuous wake-word listening loop with automatic crash recovery and device reconnect."""
         if sd is None or self.oww_model is None:
             logger.warning("[-] Audio hardware or wake-word model not available. Exiting listen loop.")
             return
@@ -244,51 +265,52 @@ class DesktopVoiceAssistant:
         logger.info(f" • Device : Default System Microphone")
         logger.info("=" * 60)
 
-        try:
-            with sd.InputStream(
-                samplerate=self.sample_rate,
-                channels=1,
-                dtype="int16",
-                blocksize=self.chunk_size,
-                device=self.device_index,
-                callback=self._audio_callback,
-            ) as stream:
-                logger.info("🟢 [READY] Listening in background for 'Jarvis'...")
-                notify_user("🟢 Jarvis Online", "Listening for 'Jarvis' or 'Hey Jarvis'")
+        while self.running:
+            try:
+                with sd.InputStream(
+                    samplerate=self.sample_rate,
+                    channels=1,
+                    dtype="int16",
+                    blocksize=self.chunk_size,
+                    device=self.device_index,
+                    callback=self._audio_callback,
+                ) as stream:
+                    logger.info("🟢 [READY] Listening in background for 'Jarvis'...")
+                    notify_user("🟢 Jarvis Online", "Listening for 'Jarvis' or 'Hey Jarvis'")
 
-                while self.running:
-                    try:
-                        chunk = self.audio_queue.get(timeout=0.5)
-                    except queue.Empty:
-                        continue
+                    while self.running:
+                        try:
+                            chunk = self.audio_queue.get(timeout=0.5)
+                        except queue.Empty:
+                            continue
 
-                    # Flatten 2D chunk to 1D array for openwakeword
-                    audio_frame = chunk.flatten()
-                    prediction = self.oww_model.predict(audio_frame)
-                    score = prediction.get(self.wake_model_name, 0.0)
+                        # Flatten 2D chunk to 1D array for openwakeword
+                        audio_frame = chunk.flatten()
+                        prediction = self.oww_model.predict(audio_frame)
+                        score = prediction.get(self.wake_model_name, 0.0)
 
-                    if score >= self.threshold:
-                        logger.info(f"\n🔔 [WAKE WORD DETECTED] 'Jarvis' detected! (Confidence: {score:.2f})")
-                        notify_user("🔔 Jarvis Awake", f"Wake-word detected! Listening...")
-                        
-                        # Play wake chime
-                        play_wake_chime()
+                        if score >= self.threshold:
+                            logger.info(f"\n🔔 [WAKE WORD DETECTED] 'Jarvis' detected! (Confidence: {score:.2f})")
+                            notify_user("🔔 Jarvis Awake", f"Wake-word detected! Listening...")
+                            
+                            # Play wake chime
+                            play_wake_chime()
 
-                        # Record command
-                        wav_data = self._record_command(stream)
-                        if wav_data:
-                            self.process_voice_interaction(wav_data)
-                        
-                        # Reset model internal buffers after interaction
-                        self.oww_model.reset()
-                        time.sleep(0.3)  # Brief acoustic settle
-                        logger.info("🟢 [READY] Resuming wake-word listening for 'Jarvis'...")
+                            # Record command
+                            wav_data = self._record_command(stream)
+                            if wav_data:
+                                self.process_voice_interaction(wav_data)
+                            
+                            # Reset model internal buffers after interaction
+                            self.oww_model.reset()
+                            time.sleep(0.2)  # Brief acoustic settle
+                            logger.info("🟢 [READY] Resuming wake-word listening for 'Jarvis'...")
 
-        except Exception as e:
-            logger.error(f"[-] Audio input stream error: {e}", exc_info=True)
-        finally:
-            self.running = False
-            logger.info("[*] Jarvis Desktop Voice Service terminated.")
+            except Exception as e:
+                if not self.running:
+                    break
+                logger.error(f"[-] Audio input stream error (auto-reconnecting in 2s): {e}")
+                time.sleep(2)
 
     def stop(self):
         """Stops the listening loop."""

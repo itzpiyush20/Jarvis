@@ -349,11 +349,6 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
         if not self.api_key or not audio_bytes:
             return ""
 
-    def analyze_image(self, image_bytes: bytes, prompt: str, mime_type: str = "image/jpeg") -> str:
-        """Analyzes an image using Gemini Multimodal Vision with Jarvis system personality."""
-        system_inst = self._build_system_instruction()
-        return self.vision.analyze_image(image_bytes, prompt, system_instruction=system_inst, mime_type=mime_type)
-
         encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
         payload = {
             "contents": [
@@ -385,7 +380,7 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                 headers={"Content-Type": "application/json"}
             )
             try:
-                with urllib.request.urlopen(req, timeout=25) as response:
+                with urllib.request.urlopen(req, timeout=12) as response:
                     result = json.loads(response.read().decode("utf-8"))
                     candidates = result.get("candidates", [])
                     if candidates:

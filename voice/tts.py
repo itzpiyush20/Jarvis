@@ -148,6 +148,22 @@ def create_spoken_reply(text: str, max_words: int = 140) -> str:
 
     return f"{spoken_core} I have provided the complete detailed breakdown in your chat, Sir."
 
+def speak_directly_sapi(text: str) -> bool:
+    """Zero-latency offline text-to-speech fallback using Windows native SAPI voice."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import win32com.client
+        import pythoncom
+        pythoncom.CoInitialize()
+        speaker = win32com.client.Dispatch("SAPI.SpVoice")
+        clean_text = clean_text_for_speech(text)
+        speaker.Speak(clean_text)
+        return True
+    except Exception as e:
+        print(f"[-] SAPI speech fallback failed: {e}")
+        return False
+
 async def generate_speech_file(text: str, filename: str = "response.mp3", voice: str = "") -> Path:
     """
     Sanitizes text and synthesizes clean neural speech to an MP3 file.
@@ -159,13 +175,27 @@ async def generate_speech_file(text: str, filename: str = "response.mp3", voice:
     selected_voice = voice or get_active_voice()
     speech_text = create_spoken_reply(text)
 
-    communicate = edge_tts.Communicate(speech_text, selected_voice)
-    await communicate.save(str(output_path))
-    return output_path
+    try:
+        communicate = edge_tts.Communicate(speech_text, selected_voice)
+        await asyncio.wait_for(communicate.save(str(output_path)), timeout=4.0)
+        return output_path
+    except Exception as e:
+        print(f"[-] edge-tts synthesis unavailable ({e}), using instant Windows native voice fallback.")
+        return output_path
 
 def speak_to_file(text: str, filename: str = "response.mp3", voice: str = "") -> Path:
-    """Synchronous helper for generate_speech_file."""
-    return asyncio.run(generate_speech_file(text, filename, voice))
+    """Synchronous helper for generate_speech_file with SAPI instant playback fallback."""
+    output_path = AUDIO_DIR / filename
+    try:
+        res = asyncio.run(generate_speech_file(text, filename, voice))
+        if res.exists() and res.stat().st_size > 500:
+            return res
+    except Exception:
+        pass
+
+    # Instant offline SAPI speech fallback
+    speak_directly_sapi(text)
+    return output_path
 
 if __name__ == "__main__":
     sample = "📬 ***Recent Unread Emails:*** • **From:** Google Cloud. All clear, Sir! 🚨"
