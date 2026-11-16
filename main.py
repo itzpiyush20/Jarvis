@@ -182,10 +182,6 @@ def main():
     if config.IS_CLOUD_DEPLOYMENT:
         print_banner()
         print("[*] Cloud environment detected. Starting Jarvis Telegram & Scheduler service...")
-        if not config.TELEGRAM_BOT_TOKEN:
-            print("[!] TELEGRAM_BOT_TOKEN is not configured in environment variables.")
-            print("    Please set TELEGRAM_BOT_TOKEN in your cloud dashboard.")
-            sys.exit(1)
         start_telegram_service()
         return
 

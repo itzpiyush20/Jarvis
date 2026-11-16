@@ -796,9 +796,43 @@ def build_telegram_application():
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
     return app
 
+def run_standalone_health_server(port: int):
+    """Runs a minimal HTTP health server to keep cloud deployment alive even if Telegram token is pending."""
+    async def serve():
+        app = web.Application()
+        app.router.add_get("/", health_check_handler)
+        app.router.add_get("/health", health_check_handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        logger.info(f"[+] Standalone cloud health check server listening on port {port}")
+        while True:
+            await asyncio.sleep(3600)
+    try:
+        asyncio.run(serve())
+    except (KeyboardInterrupt, SystemExit):
+        pass
+
 def start_telegram_service():
+    port_str = os.environ.get("PORT")
+    token = config.TELEGRAM_BOT_TOKEN
+
+    if not token:
+        print("\n" + "=" * 60)
+        print("[!] TELEGRAM_BOT_TOKEN is not configured.")
+        print("    If running on Render, add TELEGRAM_BOT_TOKEN and GEMINI_API_KEY")
+        print("    in Render Dashboard ➔ Environment.")
+        print("=" * 60 + "\n")
+        if port_str:
+            run_standalone_health_server(int(port_str))
+            return
+        return
+
     app = build_telegram_application()
     if not app:
+        if port_str:
+            run_standalone_health_server(int(port_str))
         return
 
     print("\n" + "=" * 55)

@@ -9,6 +9,8 @@ from typing import Dict, Any, Optional, Tuple
 
 IS_WINDOWS = sys.platform == "win32"
 
+from ctypes import Structure, c_byte, c_ulong, c_ulonglong, c_float, c_int, c_ushort, POINTER, byref, sizeof
+
 if IS_WINDOWS:
     try:
         import winreg
@@ -18,11 +20,16 @@ if IS_WINDOWS:
         from ctypes import wintypes
     except (ImportError, ModuleNotFoundError, ValueError, AttributeError):
         wintypes = None
+    try:
+        from ctypes import WINFUNCTYPE, HRESULT
+    except (ImportError, AttributeError):
+        WINFUNCTYPE = ctypes.CFUNCTYPE
+        HRESULT = ctypes.c_long
 else:
     winreg = None
     wintypes = None
-
-from ctypes import Structure, c_byte, c_ulong, c_ulonglong, c_float, c_int, c_ushort, POINTER, byref, sizeof, WINFUNCTYPE, HRESULT
+    WINFUNCTYPE = ctypes.CFUNCTYPE
+    HRESULT = ctypes.c_long
 
 # =====================================================================
 # WIN32 STRUCTURES & CONSTANTS
