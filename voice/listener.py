@@ -29,8 +29,9 @@ import config
 from core.brain import JarvisBrain
 from core.memory import MemoryManager
 from integrations.google_services import GoogleServices
-from voice.tts import generate_speech_file
+from voice.tts import generate_speech_file, speak_to_file
 from voice.chimes import play_wake_chime, play_thinking_chime, play_audio_file
+from voice.ui_notify import notify_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 logger = logging.getLogger("JarvisVoiceListener")
@@ -111,25 +112,34 @@ class DesktopVoiceAssistant:
 
     def _record_command(self, stream: sd.InputStream) -> bytes | None:
         """
-        Records the user's spoken voice command after wake-word activation
-        using adaptive energy silence detection. Returns WAV audio bytes.
+        Records the user's spoken voice command after wake-word activation.
+        Uses adaptive dynamic ambient baseline calibration to catch soft and normal speech.
         """
         logger.info("🎙️ [LISTENING] Jarvis is listening for your command...")
-        recorded_frames = []
-        silence_threshold = 300.0  # RMS threshold for speech activity in int16
-        speech_started = False
-        silent_chunks = 0
-        max_silent_chunks = int(1.4 / 0.08)  # ~1.4 seconds of silence to conclude speech
-        timeout_chunks = int(4.5 / 0.08)    # 4.5 seconds timeout if user doesn't start speaking
-        max_duration_chunks = int(18.0 / 0.08) # 18s maximum command limit
-        total_chunks = 0
+        notify_user("🎙️ Jarvis", "Listening for your command, Sir...")
 
-        # Drain any residual audio in queue before recording
+        recorded_frames = []
+        # Pre-populate with recent chunks in queue so no words right after wake-word are lost
         while not self.audio_queue.empty():
             try:
-                self.audio_queue.get_nowait()
+                recorded_frames.append(self.audio_queue.get_nowait())
             except queue.Empty:
                 break
+
+        # Compute dynamic ambient noise floor from the first available frames
+        sample_energies = [np.sqrt(np.mean(f.astype(np.float32) ** 2)) for f in recorded_frames if len(f) > 0]
+        ambient_baseline = np.mean(sample_energies) if sample_energies else 15.0
+        # Dynamic voice threshold: baseline * 1.3 or minimum 25.0
+        voice_threshold = max(ambient_baseline * 1.3, 25.0)
+
+        logger.debug(f"Ambient baseline RMS: {ambient_baseline:.1f}, Voice threshold: {voice_threshold:.1f}")
+
+        speech_started = False
+        silent_chunks = 0
+        max_silent_chunks = int(1.3 / 0.08)  # ~1.3s silence after speech concludes command
+        timeout_chunks = int(5.0 / 0.08)     # 5.0s window for speech to begin
+        max_duration_chunks = int(14.0 / 0.08) # 14s maximum command limit
+        total_chunks = len(recorded_frames)
 
         while self.running and total_chunks < max_duration_chunks:
             try:
@@ -140,10 +150,9 @@ class DesktopVoiceAssistant:
             total_chunks += 1
             recorded_frames.append(chunk)
 
-            # Compute RMS audio energy
             rms = np.sqrt(np.mean(chunk.astype(np.float32) ** 2))
 
-            if rms > silence_threshold:
+            if rms > voice_threshold:
                 if not speech_started:
                     logger.info("🗣️ [SPEECH DETECTED] User speaking...")
                     speech_started = True
@@ -156,10 +165,10 @@ class DesktopVoiceAssistant:
                         break
                 else:
                     if total_chunks >= timeout_chunks:
-                        logger.info("⏱️ [TIMEOUT] No speech detected after wake word.")
-                        return None
+                        logger.info("⏱️ [TIMEOUT] Concluding audio capture.")
+                        break
 
-        if not speech_started or len(recorded_frames) < 5:
+        if len(recorded_frames) < 8:
             return None
 
         # Concatenate PCM audio and wrap in WAV format
@@ -184,11 +193,13 @@ class DesktopVoiceAssistant:
 
         if not clean_query or len(clean_query) < 2:
             logger.warning("[-] Could not discern clear speech from recording.")
+            notify_user("Jarvis", "No clear speech detected.")
             return
 
         print(f"\n" + "—" * 60)
         print(f" 🗣️ You: {clean_query}")
         print("—" * 60)
+        notify_user("🗣️ You", clean_query)
 
         # 2. Gather context and query brain
         logger.info("⚡ [THINKING] Processing query with Jarvis Brain...")
@@ -197,13 +208,13 @@ class DesktopVoiceAssistant:
 
         print(f" 🤖 Jarvis: {reply}")
         print("—" * 60 + "\n")
+        notify_user(f"🤖 {config.ASSISTANT_NAME}", reply[:160])
 
         # 3. Synthesize speech
         logger.info("🎙️ [SYNTHESIZING] Synthesizing neural speech reply...")
         try:
-            import asyncio
             filename = f"desktop_reply_{int(time.time())}.mp3"
-            audio_path = asyncio.run(generate_speech_file(reply, filename=filename))
+            audio_path = speak_to_file(reply, filename=filename)
             
             # 4. Play speech through laptop speakers
             logger.info(f"🔊 [SPEAKING] Playing response through speakers...")
@@ -236,6 +247,8 @@ class DesktopVoiceAssistant:
                 callback=self._audio_callback,
             ) as stream:
                 logger.info("🟢 [READY] Listening in background for 'Jarvis'...")
+                notify_user("🟢 Jarvis Online", "Listening for 'Jarvis' or 'Hey Jarvis'")
+
                 while self.running:
                     try:
                         chunk = self.audio_queue.get(timeout=0.5)
@@ -249,6 +262,7 @@ class DesktopVoiceAssistant:
 
                     if score >= self.threshold:
                         logger.info(f"\n🔔 [WAKE WORD DETECTED] 'Jarvis' detected! (Confidence: {score:.2f})")
+                        notify_user("🔔 Jarvis Awake", f"Wake-word detected! Listening...")
                         
                         # Play wake chime
                         play_wake_chime()

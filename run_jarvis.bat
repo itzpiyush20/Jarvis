@@ -9,7 +9,7 @@ echo.
 echo Wake-word engine is active.
 echo Say "Jarvis" or "Hey Jarvis" to begin speaking.
 echo.
-python main.py --voice
+python -u main.py --voice
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo [!] An error occurred while running Jarvis.

@@ -82,5 +82,5 @@ IS_CLOUD_DEPLOYMENT = bool(
 _default_wake = "false" if IS_CLOUD_DEPLOYMENT else "true"
 ENABLE_WAKE_WORD = os.getenv("ENABLE_WAKE_WORD", _default_wake).lower() in ("true", "1", "yes")
 WAKE_WORD_MODEL = os.getenv("WAKE_WORD_MODEL", "hey_jarvis_v0.1.onnx")
-WAKE_WORD_THRESHOLD = float(os.getenv("WAKE_WORD_THRESHOLD", "0.5"))
+WAKE_WORD_THRESHOLD = float(os.getenv("WAKE_WORD_THRESHOLD", "0.30"))
 MIC_DEVICE_INDEX = int(os.getenv("MIC_DEVICE_INDEX")) if os.getenv("MIC_DEVICE_INDEX", "").strip().isdigit() else None
