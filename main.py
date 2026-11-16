@@ -77,22 +77,26 @@ def run_diagnostics():
     print(f" [•] Voice Cache Directory: 🟢 Ready ({audio_dir})")
 
     # 7. Laptop OS & System Commander
-    cmd = brain.system_commander
-    bat = cmd.get_battery_status()
-    mem_stat = cmd.get_memory_status()
-    vol = cmd.get_volume()
-    print(f" [•] Laptop OS Commander  : 🟢 Active (Win32 CoreAudio & Telemetry)")
-    print(f"     ├─ Power Status      : {bat.get('description')}")
-    print(f"     ├─ RAM Telemetry     : {mem_stat.get('description')}")
-    print(f"     └─ Master Audio      : {vol}% (Muted: {cmd.is_muted()})")
+    if not config.IS_CLOUD_DEPLOYMENT:
+        cmd = brain.system_commander
+        bat = cmd.get_battery_status()
+        mem_stat = cmd.get_memory_status()
+        vol = cmd.get_volume()
+        print(f" [•] Laptop OS Commander  : 🟢 Active (Win32 CoreAudio & Telemetry)")
+        print(f"     ├─ Power Status      : {bat.get('description')}")
+        print(f"     ├─ RAM Telemetry     : {mem_stat.get('description')}")
+        print(f"     └─ Master Audio      : {vol}% (Muted: {cmd.is_muted()})")
 
-    # 8. Visual Perception & Multimodal Vision
-    screen_ok = brain.vision.capture_screen() is not None
-    cam_bytes = brain.vision.capture_webcam()
-    cam_ok = cam_bytes is not None
-    print(f" [•] Visual Perception    : {'🟢 Ready (Desktop Screen Awareness)' if screen_ok else '⚪ Unavailable'}")
-    print(f"     ├─ Screen Grabber    : {'🟢 Active (PIL ImageGrab)' if screen_ok else '⚪ Inactive'}")
-    print(f"     └─ Webcam Vision     : {'🟢 Camera Stream Online' if cam_ok else '⚪ Standby / Hardware Guarded'}")
+        # 8. Visual Perception & Multimodal Vision
+        screen_ok = brain.vision.capture_screen() is not None
+        cam_bytes = brain.vision.capture_webcam()
+        cam_ok = cam_bytes is not None
+        print(f" [•] Visual Perception    : {'🟢 Ready (Desktop Screen Awareness)' if screen_ok else '⚪ Unavailable'}")
+        print(f"     ├─ Screen Grabber    : {'🟢 Active (PIL ImageGrab)' if screen_ok else '⚪ Inactive'}")
+        print(f"     └─ Webcam Vision     : {'🟢 Camera Stream Online' if cam_ok else '⚪ Standby / Hardware Guarded'}")
+    else:
+        print(" [•] Laptop OS Commander  : ⚪ Standby (Active on local desktop)")
+        print(" [•] Visual Perception    : ⚪ Standby (Active on local desktop)")
     print("\n" + "=" * 60 + "\n")
 
 async def run_cli_briefing():

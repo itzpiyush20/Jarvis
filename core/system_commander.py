@@ -5,9 +5,24 @@ import shutil
 import ctypes
 import webbrowser
 import subprocess
-import winreg
 from typing import Dict, Any, Optional, Tuple
-from ctypes import wintypes, Structure, c_byte, c_ulong, c_ulonglong, c_float, c_int, c_ushort, POINTER, byref, sizeof, WINFUNCTYPE, HRESULT
+
+IS_WINDOWS = sys.platform == "win32"
+
+if IS_WINDOWS:
+    try:
+        import winreg
+    except (ImportError, ModuleNotFoundError):
+        winreg = None
+    try:
+        from ctypes import wintypes
+    except (ImportError, ModuleNotFoundError, ValueError, AttributeError):
+        wintypes = None
+else:
+    winreg = None
+    wintypes = None
+
+from ctypes import Structure, c_byte, c_ulong, c_ulonglong, c_float, c_int, c_ushort, POINTER, byref, sizeof, WINFUNCTYPE, HRESULT
 
 # =====================================================================
 # WIN32 STRUCTURES & CONSTANTS
@@ -400,6 +415,9 @@ class SystemCommander:
 
     def _find_app_in_registry(self, app_name: str) -> Optional[str]:
         """Searches Windows App Paths registry keys to locate installed application binaries."""
+        if winreg is None:
+            return None
+
         clean = app_name.lower().replace(".exe", "").strip()
         search_keys = [
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"),

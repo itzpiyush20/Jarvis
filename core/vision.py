@@ -9,7 +9,17 @@ import urllib.error
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
 
-from PIL import ImageGrab, Image
+try:
+    from PIL import ImageGrab, Image
+except (ImportError, ModuleNotFoundError):
+    ImageGrab = None
+    Image = None
+
+try:
+    import cv2
+except (ImportError, ModuleNotFoundError):
+    cv2 = None
+
 import config
 
 logger = logging.getLogger("JarvisVision")
@@ -41,6 +51,10 @@ class VisionManager:
         Captures the current active desktop screen, scales if necessary to preserve bandwidth,
         and returns JPEG image bytes.
         """
+        if ImageGrab is None:
+            logger.debug("[-] Pillow / ImageGrab is not available in this environment.")
+            return None
+
         try:
             img = ImageGrab.grab()
             # Downscale if larger than max_dimension
