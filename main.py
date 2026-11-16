@@ -16,7 +16,6 @@ from core.memory import MemoryManager
 from integrations.google_services import GoogleServices
 from core.scheduler import JarvisScheduler
 from integrations.telegram_bot import start_telegram_service
-from voice.listener import DesktopVoiceAssistant, start_voice_service
 
 BANNER = r"""
    ╦╔═╗╦═╗╦  ╦╦╔═╗
@@ -29,6 +28,7 @@ def print_banner():
     print(BANNER)
     print("=" * 60)
     print(f" Assistant: {config.ASSISTANT_NAME} | User: {config.USER_NAME}")
+    print(f" Environment: {'☁️ Cloud Platform' if config.IS_CLOUD_DEPLOYMENT else '💻 Local Desktop / Laptop'}")
     print("=" * 60)
 
 def run_diagnostics():
@@ -48,18 +48,18 @@ def run_diagnostics():
         print(f" [•] Default Microphone   : 🟢 {in_dev['name']}")
         print(f" [•] Default Speakers     : 🟢 {out_dev['name']}")
     except Exception as e:
-        print(f" [•] Audio Devices Check  : ⚠️ Error ({e})")
+        print(f" [•] Audio Devices Check  : ⚪ Headless / Not available ({e})")
 
     try:
         from openwakeword.model import Model
         oww = Model(wakeword_models=[config.WAKE_WORD_MODEL], inference_framework="onnx")
         print(f" [•] Wake-Word Engine     : 🟢 Ready ('{config.WAKE_WORD_MODEL}')")
     except Exception as e:
-        print(f" [•] Wake-Word Engine     : 🔴 Model missing or error ({e})")
+        print(f" [•] Wake-Word Engine     : ⚪ Inactive ({e})")
 
     # 3. Telegram Bot
     tg_token_ok = bool(config.TELEGRAM_BOT_TOKEN)
-    print(f" [•] Telegram Bot Token   : {'🟢 OK' if tg_token_ok else '⚪ Not configured (Optional for Desktop Voice)'}")
+    print(f" [•] Telegram Bot Token   : {'🟢 OK' if tg_token_ok else '⚪ Not configured (TELEGRAM_BOT_TOKEN)'}")
     print(f" [•] Primary Telegram User: {config.TELEGRAM_USER_ID or '⚠️ None (Will pair on /start)'}")
 
     # 4. Google Workspace
@@ -86,21 +86,41 @@ async def run_cli_briefing():
     print("\n" + "=" * 60 + "\n")
 
 def run_all_services():
-    """Runs both Telegram Bot and Desktop Voice Assistant concurrently."""
+    """Runs both Telegram Bot and Desktop Voice Assistant concurrently if hardware permits."""
     print_banner()
-    print("[*] Launching Jarvis in Unified Dual Mode (Desktop Voice + Telegram Bot)...")
 
-    # Start Desktop Voice Assistant in a background daemon thread
-    assistant = DesktopVoiceAssistant()
-    voice_thread = threading.Thread(target=assistant.listen_loop, daemon=True, name="JarvisVoiceListener")
-    voice_thread.start()
+    if config.IS_CLOUD_DEPLOYMENT:
+        print("[*] Cloud deployment detected. Physical mic listener disabled; running Telegram Bot.")
+        start_telegram_service()
+        return
+
+    # Attempt to initialize Desktop Voice Assistant on local hardware
+    assistant = None
+    try:
+        from voice.listener import DesktopVoiceAssistant
+        assistant = DesktopVoiceAssistant()
+        voice_thread = threading.Thread(target=assistant.listen_loop, daemon=True, name="JarvisVoiceListener")
+        voice_thread.start()
+        print("[*] Desktop Voice Assistant active in background.")
+    except Exception as e:
+        print(f"[!] Desktop Voice Assistant could not start ({e}). Continuing with Telegram service.")
 
     # Run Telegram Bot in the foreground
     try:
         start_telegram_service()
     except KeyboardInterrupt:
         print("\n[*] Shutting down Jarvis Unified Services. Have a wonderful day, Sir.")
-        assistant.stop()
+        if assistant:
+            assistant.stop()
+
+def run_voice_only():
+    """Starts the standalone desktop voice assistant."""
+    print_banner()
+    try:
+        from voice.listener import start_voice_service
+        start_voice_service()
+    except Exception as e:
+        print(f"[!] Could not start voice service: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description="Jarvis Personal AI Assistant")
@@ -120,8 +140,7 @@ def main():
         return
 
     if args.voice:
-        print_banner()
-        start_voice_service()
+        run_voice_only()
         return
 
     if args.telegram:
@@ -137,14 +156,24 @@ def main():
         return
 
     # Default launch logic:
-    # If both Telegram token and wake word are enabled, launch unified mode.
-    # If no Telegram token, start desktop voice directly.
+    # 1. On Cloud Platforms (Render, Railway, etc.): Always run the Telegram Bot service.
+    if config.IS_CLOUD_DEPLOYMENT:
+        print_banner()
+        print("[*] Cloud environment detected. Starting Jarvis Telegram & Scheduler service...")
+        if not config.TELEGRAM_BOT_TOKEN:
+            print("[!] TELEGRAM_BOT_TOKEN is not configured in environment variables.")
+            print("    Please set TELEGRAM_BOT_TOKEN in your cloud dashboard.")
+            sys.exit(1)
+        start_telegram_service()
+        return
+
+    # 2. On Local Laptop:
     if config.ENABLE_WAKE_WORD and config.TELEGRAM_BOT_TOKEN:
         run_all_services()
     elif config.ENABLE_WAKE_WORD:
         print_banner()
         print("[*] Telegram token not detected. Starting Desktop Voice Assistant...")
-        start_voice_service()
+        run_voice_only()
     else:
         print_banner()
         start_telegram_service()

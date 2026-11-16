@@ -1,8 +1,16 @@
 import numpy as np
-import sounddevice as sd
-import soundfile as sf
 import time
 from pathlib import Path
+
+try:
+    import sounddevice as sd
+except (ImportError, OSError):
+    sd = None
+
+try:
+    import soundfile as sf
+except (ImportError, OSError):
+    sf = None
 
 def _synthesize_sine_chime(tones: list[tuple[float, float]], sample_rate: int = 16000, volume: float = 0.25) -> np.ndarray:
     """
@@ -26,12 +34,14 @@ def _synthesize_sine_chime(tones: list[tuple[float, float]], sample_rate: int = 
 
 def play_chime(tones: list[tuple[float, float]], volume: float = 0.22, blocking: bool = True):
     """Plays procedural chime tones through the default speaker."""
+    if sd is None:
+        return
     try:
         audio = _synthesize_sine_chime(tones, sample_rate=16000, volume=volume)
         sd.play(audio, samplerate=16000)
         if blocking:
             sd.wait()
-    except Exception as e:
+    except Exception:
         # Audio playback should never crash the main loop
         pass
 
@@ -45,6 +55,8 @@ def play_thinking_chime():
 
 def play_audio_file(file_path: str | Path, blocking: bool = True):
     """Plays an audio file (.mp3, .wav) through laptop speakers using sounddevice and soundfile."""
+    if sd is None or sf is None:
+        return
     try:
         data, fs = sf.read(str(file_path))
         sd.play(data, fs)

@@ -53,8 +53,19 @@ DB_PATH = BASE_DIR / "jarvis_memory.db"
 AUDIO_DIR = BASE_DIR / "temp_audio"
 AUDIO_DIR.mkdir(exist_ok=True)
 
+# Cloud Environment Detection (Render, Railway, Fly, Heroku, etc.)
+IS_CLOUD_DEPLOYMENT = bool(
+    os.getenv("RENDER") or
+    os.getenv("RAILWAY_ENVIRONMENT") or
+    os.getenv("DYNO") or
+    os.getenv("FLY_APP_NAME") or
+    os.getenv("K_SERVICE")
+)
+
 # Wake-Word / Desktop Voice Configuration
-ENABLE_WAKE_WORD = os.getenv("ENABLE_WAKE_WORD", "true").lower() in ("true", "1", "yes")
+# Automatically disabled in headless cloud environments where no physical microphone exists
+_default_wake = "false" if IS_CLOUD_DEPLOYMENT else "true"
+ENABLE_WAKE_WORD = os.getenv("ENABLE_WAKE_WORD", _default_wake).lower() in ("true", "1", "yes")
 WAKE_WORD_MODEL = os.getenv("WAKE_WORD_MODEL", "hey_jarvis_v0.1.onnx")
 WAKE_WORD_THRESHOLD = float(os.getenv("WAKE_WORD_THRESHOLD", "0.5"))
 MIC_DEVICE_INDEX = int(os.getenv("MIC_DEVICE_INDEX")) if os.getenv("MIC_DEVICE_INDEX", "").strip().isdigit() else None

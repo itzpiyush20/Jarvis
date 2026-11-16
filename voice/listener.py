@@ -14,8 +14,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import sounddevice as sd
-from openwakeword.model import Model
+try:
+    import sounddevice as sd
+except (ImportError, OSError):
+    sd = None
+
+try:
+    from openwakeword.model import Model
+except (ImportError, OSError):
+    Model = None
 
 import config
 from core.brain import JarvisBrain
@@ -41,6 +48,11 @@ class DesktopVoiceAssistant:
         threshold: float = config.WAKE_WORD_THRESHOLD,
         device_index: int | None = config.MIC_DEVICE_INDEX,
     ):
+        if sd is None:
+            raise RuntimeError("sounddevice (PortAudio) is not installed or available on this system.")
+        if Model is None:
+            raise RuntimeError("openwakeword is not installed or available on this system.")
+
         self.wake_model_name = wake_model_name
         self.threshold = threshold
         self.device_index = device_index
@@ -188,6 +200,10 @@ class DesktopVoiceAssistant:
 
     def listen_loop(self):
         """Continuous wake-word listening loop."""
+        if sd is None or self.oww_model is None:
+            logger.warning("[-] Audio hardware or wake-word model not available. Exiting listen loop.")
+            return
+
         self.running = True
         logger.info("=" * 60)
         logger.info(f" 🎙️ Jarvis Desktop Voice Service ACTIVE")
@@ -246,12 +262,17 @@ class DesktopVoiceAssistant:
 
 def start_voice_service():
     """Convenience launcher for the standalone desktop voice assistant."""
-    assistant = DesktopVoiceAssistant()
     try:
+        assistant = DesktopVoiceAssistant()
         assistant.listen_loop()
     except KeyboardInterrupt:
         print("\n[*] Stopping Jarvis Voice Service. Goodbye, Sir.")
-        assistant.stop()
+        try:
+            assistant.stop()
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"\n[!] Could not start desktop voice service: {e}")
 
 
 if __name__ == "__main__":
