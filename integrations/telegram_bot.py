@@ -63,6 +63,13 @@ def get_context_for_query(query: str) -> str:
     if any(k in lower for k in ["task", "todo", "reminder", "notes"]):
         pending = memory.get_pending_tasks()
         ctx += f"\nPending Tasks in Database: {pending}\n"
+    if any(k in lower for k in ["laptop", "battery", "system", "specs", "ram", "cpu", "hardware", "storage", "disk"]):
+        telemetry = brain.system_commander.get_system_telemetry()
+        ctx += f"\nLive Workstation Telemetry:\n{telemetry}\n"
+    if any(k in lower for k in ["clipboard", "copied"]):
+        clip = brain.system_commander.get_clipboard_text()
+        if clip:
+            ctx += f"\nWorkstation Clipboard Content:\n\"\"\"\n{clip[:2000]}\n\"\"\"\n"
     return ctx
 
 def format_to_telegram_html(text: str) -> str:
@@ -164,7 +171,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• `/location <city>` → Check or update your active city/location.\n"
         f"• `/settings` → Inspect and customize dynamic preferences.\n"
         f"• `/voice_model` → Switch voice (Prabhat Indian 🇮🇳, Brian Global 🌐, Neerja Female 🇮🇳).\n"
-        f"• `/status` → Inspect system diagnostics & status."
+        f"• `/status` → Inspect system diagnostics & status.\n\n"
+        f"**Laptop OS & System Commander:**\n"
+        f"• `/system` → Live telemetry (Battery, RAM, CPU, Disk, Volume).\n"
+        f"• `/lock` → Remotely lock your Windows laptop immediately.\n"
+        f"• `/volume <0-100>` → Set or inspect laptop master volume.\n"
+        f"• `/mute` / `/unmute` → Silence or restore laptop speakers.\n"
+        f"• `/open <app or url>` → Launch apps (VS Code, Chrome, Spotify) or websites.\n"
+        f"• `/clipboard` → Read text currently copied on your laptop clipboard."
     )
     await send_safe_html_reply(update, welcome)
 
@@ -528,6 +542,107 @@ async def voice_model_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         msg += "<i>Usage: <code>/voice_model brian</code> or tell me in chat 'Change voice to Brian'</i>"
         await send_safe_html_reply(update, msg)
 
+async def system_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reports live workstation telemetry: battery, RAM, CPU, storage, and audio volume."""
+    if not is_authorized(update):
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    bat = brain.system_commander.get_battery_status()
+    mem = brain.system_commander.get_memory_status()
+    cpu = brain.system_commander.get_cpu_status()
+    disk = brain.system_commander.get_disk_status()
+    vol = brain.system_commander.get_volume()
+    muted = brain.system_commander.is_muted()
+
+    msg = "💻 <b>Workstation Telemetry & System Status:</b>\n\n"
+    msg += f"⚡ <b>Battery & Power:</b> {bat.get('description')}\n"
+    msg += f"🧠 <b>Memory (RAM):</b> {mem.get('description')}\n"
+    msg += f"⚙️ <b>Processor (CPU):</b> {cpu.get('description')}\n"
+    msg += f"💾 <b>Storage:</b> {disk.get('description')}\n"
+    msg += f"🔊 <b>Master Audio:</b> {vol}% ({'Muted' if muted else 'Active'})\n\n"
+    msg += "<i>Remotely command your laptop: <code>/lock</code>, <code>/volume 40</code>, <code>/mute</code>, <code>/open &lt;app&gt;</code>, <code>/clipboard</code></i>"
+    await send_safe_html_reply(update, msg)
+
+async def lock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remotely locks the Windows desktop workstation immediately."""
+    if not is_authorized(update):
+        return
+    success, reply = brain.system_commander.lock_workstation()
+    if success:
+        await send_safe_html_reply(update, f"🔒 <b>Workstation Secured:</b> {reply}")
+    else:
+        await send_safe_html_reply(update, f"⚠️ <b>Lock Failed:</b> {reply}")
+
+async def volume_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gets or sets the laptop master audio volume."""
+    if not is_authorized(update):
+        return
+    if context.args:
+        try:
+            val = int(context.args[0].replace("%", ""))
+            success, reply = brain.system_commander.set_volume(val)
+            await send_safe_html_reply(update, f"🔊 {reply}")
+        except ValueError:
+            await send_safe_html_reply(update, "Usage: <code>/volume 40</code> (0 to 100)")
+    else:
+        vol = brain.system_commander.get_volume()
+        muted = brain.system_commander.is_muted()
+        await send_safe_html_reply(update, f"🔊 <b>Current Volume:</b> {vol}% ({'Muted' if muted else 'Active'}).\n<i>Use <code>/volume 50</code> to adjust.</i>")
+
+async def mute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mutes the laptop speakers."""
+    if not is_authorized(update):
+        return
+    success, reply = brain.system_commander.set_mute(True)
+    await send_safe_html_reply(update, f"🔇 {reply}")
+
+async def unmute_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Unmutes the laptop speakers."""
+    if not is_authorized(update):
+        return
+    success, reply = brain.system_commander.set_mute(False)
+    await send_safe_html_reply(update, f"🔊 {reply}")
+
+async def open_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Launches an application or website on the laptop workstation."""
+    if not is_authorized(update):
+        return
+    target = " ".join(context.args).strip()
+    if not target:
+        await send_safe_html_reply(update, "Usage: <code>/open vs code</code> or <code>/open youtube</code>")
+        return
+    success, reply = brain.system_commander.launch(target)
+    await send_safe_html_reply(update, f"🚀 {reply}")
+
+async def clipboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inspects text copied on the workstation clipboard."""
+    if not is_authorized(update):
+        return
+    clip_text = brain.system_commander.get_clipboard_text()
+    if not clip_text:
+        await send_safe_html_reply(update, "📋 <b>Workstation Clipboard:</b> Clipboard is currently empty, Sir.")
+    else:
+        preview = clip_text[:1500]
+        escaped = html.escape(preview)
+        msg = f"📋 <b>Workstation Clipboard ({len(clip_text)} chars):</b>\n\n<pre>{escaped}</pre>"
+        if len(clip_text) > 1500:
+            msg += f"\n<i>[+{len(clip_text)-1500} additional characters truncated]</i>"
+        await send_safe_html_reply(update, msg)
+
+async def dim_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Dims screen brightness on the laptop."""
+    if not is_authorized(update):
+        return
+    pct = 30
+    if context.args:
+        try:
+            pct = int(context.args[0].replace("%", ""))
+        except ValueError:
+            pass
+    success, reply = brain.system_commander.set_brightness(pct)
+    await send_safe_html_reply(update, f"💡 {reply}")
+
 async def health_check_handler(request):
     return web.Response(text="🟢 Jarvis Assistant Service is operational.")
 
@@ -577,6 +692,15 @@ def build_telegram_application():
     app.add_handler(CommandHandler("location", location_command))
     app.add_handler(CommandHandler("locate", locate_command))
     app.add_handler(CommandHandler("voice_model", voice_model_command))
+    app.add_handler(CommandHandler("system", system_command))
+    app.add_handler(CommandHandler("laptop", system_command))
+    app.add_handler(CommandHandler("lock", lock_command))
+    app.add_handler(CommandHandler("volume", volume_command))
+    app.add_handler(CommandHandler("mute", mute_command))
+    app.add_handler(CommandHandler("unmute", unmute_command))
+    app.add_handler(CommandHandler("open", open_command))
+    app.add_handler(CommandHandler("clipboard", clipboard_command))
+    app.add_handler(CommandHandler("dim", dim_command))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_voice_message))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))

@@ -108,6 +108,13 @@ class DesktopVoiceAssistant:
         if any(k in lower for k in ["task", "todo", "reminder", "notes"]):
             pending = self.memory.get_pending_tasks()
             ctx += f"\nPending Tasks in Database: {pending}\n"
+        if any(k in lower for k in ["battery", "power", "charging", "laptop", "hardware", "system status", "specs", "ram", "cpu", "storage", "disk"]):
+            telemetry = self.brain.system_commander.get_system_telemetry()
+            ctx += f"\nLive Workstation Telemetry:\n{telemetry}\n"
+        if any(k in lower for k in ["clipboard", "copied"]):
+            clip = self.brain.system_commander.get_clipboard_text()
+            if clip:
+                ctx += f"\nWorkstation Clipboard Content:\n\"\"\"\n{clip[:2000]}\n\"\"\"\n"
         return ctx
 
     def _record_command(self, stream: sd.InputStream) -> bytes | None:

@@ -75,6 +75,16 @@ def run_diagnostics():
     # 6. Audio Cache
     audio_dir = config.AUDIO_DIR
     print(f" [•] Voice Cache Directory: 🟢 Ready ({audio_dir})")
+
+    # 7. Laptop OS & System Commander
+    cmd = brain.system_commander
+    bat = cmd.get_battery_status()
+    mem_stat = cmd.get_memory_status()
+    vol = cmd.get_volume()
+    print(f" [•] Laptop OS Commander  : 🟢 Active (Win32 CoreAudio & Telemetry)")
+    print(f"     ├─ Power Status      : {bat.get('description')}")
+    print(f"     ├─ RAM Telemetry     : {mem_stat.get('description')}")
+    print(f"     └─ Master Audio      : {vol}% (Muted: {cmd.is_muted()})")
     print("\n" + "=" * 60 + "\n")
 
 async def run_cli_briefing():

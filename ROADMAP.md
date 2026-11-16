@@ -14,26 +14,26 @@
 
 ---
 
-## 🟡 Phase 2: Laptop OS & System Commander (UPCOMING)
+## 🟢 Phase 2: Laptop OS & System Commander (COMPLETED)
 *Empowering Jarvis with direct, safe controls over your laptop hardware and everyday operating system tasks.*
-- [ ] **Hardware & Telemetry Monitoring**:
+- [x] **Hardware & Telemetry Monitoring**:
   - Voice queries for battery level, charging status, CPU/RAM usage, and available disk storage.
-  - Low battery voice alerts and high-temperature warnings.
-- [ ] **Native OS Audio & Display Controls**:
+  - Autonomous low battery voice alerts and Telegram warning guardian.
+- [x] **Native OS Audio & Display Controls**:
   - Hands-free volume adjustment (`"Jarvis, volume 40%"`, `"Jarvis, mute"`).
-  - Screen brightness adjustment (`"Jarvis, dim the screen"`).
-- [ ] **Application & Window Launcher**:
+  - Hardware gamma screen brightness adjustment (`"Jarvis, dim the screen"`).
+- [x] **Application & Window Launcher**:
   - Launching apps on command (`"Jarvis, open VS Code"`, `"Jarvis, open Chrome"`, `"Jarvis, open Spotify"`).
   - Quick website launcher (`"Jarvis, open YouTube"`, `"Jarvis, open GitHub"`).
-- [ ] **Workstation Security Controls**:
-  - Instant security lock (`"Jarvis, lock the laptop"`).
-  - Power management (`"Jarvis, sleep mode"`, `"Jarvis, restart"` with confirmation).
-- [ ] **Clipboard Intelligence**:
-  - Reading or summarizing whatever is copied on the clipboard (`"Jarvis, explain what is on my clipboard"`).
+- [x] **Workstation Security Controls**:
+  - Instant security lock (`"Jarvis, lock the laptop"` via voice and remote Telegram `/lock`).
+  - Power management (`"Jarvis, sleep mode"` system suspension).
+- [x] **Clipboard Intelligence**:
+  - Reading, summarizing, or explaining whatever is copied on the Windows clipboard (`"Jarvis, explain what is on my clipboard"`, `/clipboard`).
 
 ---
 
-## 🟠 Phase 3: Visual Perception & Multimodal Intelligence
+## 🟡 Phase 3: Visual Perception & Multimodal Intelligence (UPCOMING)
 *Giving Jarvis eyes using your laptop webcam and live screen capture.*
 - [ ] **Webcam Sight ("Jarvis, what am I holding?" / "Look at this")**:
   - Captures a frame from your webcam on voice command and analyzes it with Gemini multimodal vision.

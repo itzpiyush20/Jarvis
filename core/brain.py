@@ -10,6 +10,7 @@ import config
 from core.memory import MemoryManager
 from core.location import LocationManager
 from core.search import WebSearchEngine
+from core.system_commander import SystemCommander
 
 # Tested and responsive models for the Gemini Free Tier
 PREFERRED_MODELS = [
@@ -28,6 +29,7 @@ class JarvisBrain:
         self.memory = MemoryManager()
         self.location_manager = LocationManager(self.memory)
         self.search_engine = WebSearchEngine()
+        self.system_commander = SystemCommander()
 
     def _get_current_ist_string(self) -> str:
         """Returns current date and time formatted in Indian Standard Time (IST)."""
@@ -95,6 +97,14 @@ FORMATTING & TONE:
 • Telegram Formatting: Use clean sections, bullet points (•), and tasteful formatting.
 • Audio & Voice Readability: Avoid unnecessary or raw multi-asterisk markers ("**") inside running prose. Keep paragraphs natural and well-structured so the response reads and speaks with an elegant, natural tone.
 
+LAPTOP OS & SYSTEM COMMANDER PROTOCOL:
+• You possess direct, hardware-level command over {user_name}'s laptop workstation via your native Win32 system controller.
+• You can monitor and report live battery telemetry, power status, CPU/RAM utilization, and disk storage.
+• You can adjust system audio volume, mute/unmute, and calibrate screen brightness.
+• You can launch desktop applications (VS Code, Chrome, Spotify, etc.) and open websites.
+• You can inspect, explain, summarize, or debug text copied to the Windows clipboard.
+• You can lock the workstation immediately when requested for security.
+
 STRICT SAFETY AND PRIVACY PROTOCOLS:
 1. ZERO DELETIONS: You have NO authority or capability to delete, trash, or purge any emails, calendar events, or documents.
 2. NO UNAPPROVED MODIFICATIONS: You must NEVER alter, modify, or reschedule any existing calendar events or emails without explicit instruction.
@@ -105,12 +115,37 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
 
     def ask(self, prompt: str, context: str = "") -> str:
         """Sends a prompt to Gemini with real-time web search, Indian context, learned memory, and proactive insights."""
+        # 1. Direct hardware & OS command interception (microsecond local execution)
+        intercept = self.system_commander.intercept_command(prompt)
+        if intercept:
+            try:
+                self.memory.log_conversation("user", prompt)
+                self.memory.log_conversation("assistant", intercept)
+            except Exception:
+                pass
+            return intercept
+
         if not self.api_key:
             return "Sir, the Gemini API key is missing. Please configure GEMINI_API_KEY in your .env file."
 
         # Detect conversational location changes
         self.location_manager.detect_and_handle_location_change(prompt)
         user_loc = self.location_manager.get_user_location()
+
+        # Clipboard Intelligence Context
+        lower_prompt = prompt.lower()
+        if any(k in lower_prompt for k in ["clipboard", "what's copied", "what is copied", "what did i copy"]):
+            clip_text = self.system_commander.get_clipboard_text()
+            if not clip_text:
+                if any(k in lower_prompt for k in ["what is on my clipboard", "what's on my clipboard", "read my clipboard", "read clipboard"]):
+                    return "Sir, your clipboard is currently empty. There is no text copied on your workstation."
+            else:
+                context += f"\nLive Workstation Clipboard Content:\n\"\"\"\n{clip_text[:3000]}\n\"\"\"\n"
+
+        # Hardware & Telemetry Context
+        if any(k in lower_prompt for k in ["laptop", "system", "hardware", "battery", "ram", "cpu", "specs", "disk", "storage"]):
+            telemetry = self.system_commander.get_system_telemetry()
+            context += f"\nLive Workstation Telemetry:\n{telemetry}\n"
 
         # Real-time Web Search Intelligence
         web_search_context = ""

@@ -32,6 +32,7 @@ class JarvisScheduler:
 
         self._alerted_event_ids: Set[str] = set()
         self._alerted_email_ids: Set[str] = set()
+        self._alerted_low_battery: bool = False
         self._last_briefing_date: Optional[datetime.date] = None
         self._is_running = False
 
@@ -197,6 +198,34 @@ class JarvisScheduler:
             except Exception:
                 await self.send_user_message(msg)
 
+    async def check_battery_status(self):
+        """Scans laptop power status and alerts when battery drops below 20% on discharge."""
+        bat = await asyncio.to_thread(self.brain.system_commander.get_battery_status)
+        if not bat.get("available") or not bat.get("is_laptop"):
+            return
+
+        percent = bat.get("percent", 100)
+        is_plugged = bat.get("is_plugged", True)
+
+        if is_plugged:
+            self._alerted_low_battery = False
+            return
+
+        if percent <= 20 and not self._alerted_low_battery:
+            self._alerted_low_battery = True
+            spoken = f"Sir, critical power warning. Battery is at {percent}%. Please connect your charger immediately."
+            msg = (
+                f"🪫 <b>LOW BATTERY WARNING</b> 🪫\n\n"
+                f"• <b>Level:</b> <code>{percent}%</code>\n"
+                f"• <b>Status:</b> Discharging on battery power\n\n"
+                f"<i>Please connect your laptop to AC power, Sir.</i>"
+            )
+            try:
+                audio_path = await generate_speech_file(spoken, filename="low_battery_alert.mp3")
+                await self.send_user_voice(audio_path, caption=msg)
+            except Exception:
+                await self.send_user_message(msg, parse_mode="HTML")
+
     async def run_loop(self):
         """Main autonomous scheduler loop running periodically."""
         self._is_running = True
@@ -223,6 +252,10 @@ class JarvisScheduler:
                 # 3. Urgent email checks (every 5 cycles ~ 5 mins)
                 if cycle_count % 5 == 0:
                     await self.check_urgent_emails()
+
+                # 4. Low battery power check (every 3 cycles ~ 3 mins)
+                if cycle_count % 3 == 0:
+                    await self.check_battery_status()
 
             except Exception as e:
                 logger.error(f"[-] Error in scheduler cycle: {e}")

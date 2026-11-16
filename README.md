@@ -28,6 +28,13 @@ An autonomous, multi-modal personal assistant designed for mobile productivity v
   - **Urgent Email Monitor**: Periodically scans inbox for high-priority/urgent emails and alerts immediately.
   - **On-Demand Briefings**: Use `/briefing` at any time for an instant audio and text report.
 
+- **💻 Laptop OS & System Commander (Win32 Native)**:
+  - **Hardware Telemetry**: Voice and text queries for battery percentage, charging status, RAM usage, CPU load, and disk storage.
+  - **Native Audio & Screen Controls**: Hands-free master volume adjustment (`"Jarvis, volume 40%"`), mute/unmute, and display brightness dimming.
+  - **Application & Website Launcher**: Launch local apps (`"Jarvis, open VS Code"`, `"Jarvis, open Spotify"`) and websites (`"Jarvis, open YouTube"`).
+  - **Workstation Security**: Instant security lock (`"Jarvis, lock the laptop"` or remote Telegram `/lock`) and sleep mode.
+  - **Clipboard Intelligence**: Read, explain, or summarize whatever is copied on your Windows clipboard (`"Jarvis, explain what is on my clipboard"`).
+
 - **💾 Persistent SQLite Memory**:
   - Long-term note taking and task management with urgency and due-date tracking.
 
@@ -99,6 +106,12 @@ You have multiple convenient launch modes:
 | `/tasks` | View pending tasks and urgent to-dos |
 | `/note <text>` | Save a note into long-term SQLite memory |
 | `/voice <query>` | Ask Jarvis any question and get a spoken voice response |
+| `/system` | Live workstation telemetry (battery %, RAM, CPU, storage, volume) |
+| `/lock` | Remotely lock Windows workstation immediately from your phone |
+| `/volume <0-100>` | Inspect or adjust laptop master audio volume |
+| `/mute` / `/unmute` | Silence or restore laptop speakers |
+| `/open <app or url>` | Launch apps (VS Code, Chrome, Spotify) or websites on laptop |
+| `/clipboard` | Inspect text currently copied to your Windows clipboard |
 | `/status` | Diagnostic health check of all assistant subsystems |
 
 ---
@@ -110,14 +123,21 @@ Jarvis/
 ├── main.py                     # Unified CLI launcher & diagnostics runner
 ├── config.py                   # Environment config & IPv4 DNS optimization
 ├── jarvis_memory.db            # SQLite persistent memory (tasks & notes)
+├── ROADMAP.md                  # Comprehensive phased evolution roadmap
 ├── core/
 │   ├── brain.py                # Gemini API client with audio transcription & failover
+│   ├── system_commander.py     # Win32 native laptop OS controller (audio, telemetry, apps)
 │   ├── memory.py               # SQLite storage manager for tasks & notes
+│   ├── location.py             # Dynamic GPS & regional calibration engine
+│   ├── search.py               # Real-time web intelligence extractor
 │   └── scheduler.py            # Autonomous background scheduler & guardians
 ├── integrations/
 │   ├── google_services.py      # Google Calendar & Gmail HTTP client with auto-refresh
 │   └── telegram_bot.py         # Telegram companion bot with voice & text handlers
 ├── voice/
+│   ├── listener.py             # Hands-free local ONNX wake-word voice assistant
+│   ├── chimes.py               # Synthesized audio feedback chimes
+│   ├── ui_notify.py            # Native Windows desktop toast notifications
 │   └── tts.py                  # Edge-TTS neural speech synthesis engine
 └── temp_audio/                 # Generated voice responses cache
 ```
