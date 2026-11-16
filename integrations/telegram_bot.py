@@ -178,7 +178,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• `/volume <0-100>` → Set or inspect laptop master volume.\n"
         f"• `/mute` / `/unmute` → Silence or restore laptop speakers.\n"
         f"• `/open <app or url>` → Launch apps (VS Code, Chrome, Spotify) or websites.\n"
-        f"• `/clipboard` → Read text currently copied on your laptop clipboard."
+        f"• `/clipboard` → Read text currently copied on your laptop clipboard.\n\n"
+        f"**Visual Perception & Multimodal Sight:**\n"
+        f"• `/screen [query]` → Capture live desktop screenshot with Gemini visual analysis.\n"
+        f"• `/webcam [query]` → Capture live webcam frame with Gemini sight analysis.\n"
+        f"• **Send Any Photo 📸** → Send any image or document for instant inspection & voice reply."
     )
     await send_safe_html_reply(update, welcome)
 
@@ -643,6 +647,87 @@ async def dim_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     success, reply = brain.system_commander.set_brightness(pct)
     await send_safe_html_reply(update, f"💡 {reply}")
 
+async def screen_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Captures a live desktop screenshot and analyzes it with Gemini Multimodal Vision."""
+    if not is_authorized(update):
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+
+    query = " ".join(context.args).strip() if context.args else "Explain what is on my screen in detail, Sir."
+    success, analysis, img_bytes = await asyncio.to_thread(brain.vision.inspect_screen, query)
+
+    if not success or not img_bytes:
+        await send_safe_html_reply(update, f"⚠️ <b>Screen Capture Notice:</b> {analysis}")
+        return
+
+    # Send screenshot photo with visual analysis
+    buf = io.BytesIO(img_bytes)
+    buf.seek(0)
+    caption_text = format_to_telegram_html(f"🖥️ <b>Workstation Screen Snapshot</b>\n\n{analysis[:950]}")
+    await update.message.reply_photo(photo=buf, caption=caption_text, parse_mode="HTML")
+    if len(analysis) > 950:
+        await send_safe_html_reply(update, analysis[950:])
+
+async def webcam_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Captures a webcam frame and analyzes it with Gemini Multimodal Vision."""
+    if not is_authorized(update):
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+
+    query = " ".join(context.args).strip() if context.args else "Describe what you see in front of the camera, Sir."
+    success, analysis, img_bytes = await asyncio.to_thread(brain.vision.inspect_webcam, query)
+
+    if not success or not img_bytes:
+        await send_safe_html_reply(update, f"⚠️ <b>Camera Notice:</b> {analysis}")
+        return
+
+    buf = io.BytesIO(img_bytes)
+    buf.seek(0)
+    caption_text = format_to_telegram_html(f"📷 <b>Webcam Sight Snapshot</b>\n\n{analysis[:950]}")
+    await update.message.reply_photo(photo=buf, caption=caption_text, parse_mode="HTML")
+    if len(analysis) > 950:
+        await send_safe_html_reply(update, analysis[950:])
+
+async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Processes user-uploaded photos via Telegram with Gemini Multimodal Vision and voice reply."""
+    if not is_authorized(update):
+        return
+
+    photo = update.message.photo[-1] if update.message.photo else None
+    if not photo and update.message.document:
+        doc = update.message.document
+        if doc.mime_type and doc.mime_type.startswith("image/"):
+            photo = doc
+
+    if not photo:
+        return
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    user_caption = (update.message.caption or "").strip() or "Carefully inspect and analyze this image in detail, Sir."
+
+    try:
+        photo_file = await photo.get_file()
+        photo_bytes = await photo_file.download_as_bytearray()
+
+        analysis = await asyncio.to_thread(
+            brain.analyze_image,
+            bytes(photo_bytes),
+            user_caption
+        )
+
+        await send_safe_html_reply(update, f"👁️ <b>Visual Analysis:</b>\n\n{analysis}")
+
+        # Optional audio reply for high engagement
+        try:
+            audio_path = await generate_speech_file(analysis[:350], filename=f"vision_{update.message.id}.mp3")
+            with open(audio_path, "rb") as audio:
+                await update.message.reply_voice(voice=audio, caption="🗣️ Spoken Summary")
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(f"[-] Photo visual inspection error: {e}")
+        await send_safe_html_reply(update, f"Apologies, Sir. Visual inspection failed: {e}")
+
 async def health_check_handler(request):
     return web.Response(text="🟢 Jarvis Assistant Service is operational.")
 
@@ -701,6 +786,11 @@ def build_telegram_application():
     app.add_handler(CommandHandler("open", open_command))
     app.add_handler(CommandHandler("clipboard", clipboard_command))
     app.add_handler(CommandHandler("dim", dim_command))
+    app.add_handler(CommandHandler("screen", screen_command))
+    app.add_handler(CommandHandler("screenshot", screen_command))
+    app.add_handler(CommandHandler("webcam", webcam_command))
+    app.add_handler(CommandHandler("camera", webcam_command))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_photo_message))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_voice_message))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))

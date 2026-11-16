@@ -11,6 +11,7 @@ from core.memory import MemoryManager
 from core.location import LocationManager
 from core.search import WebSearchEngine
 from core.system_commander import SystemCommander
+from core.vision import VisionManager
 
 # Tested and responsive models for the Gemini Free Tier
 PREFERRED_MODELS = [
@@ -30,6 +31,7 @@ class JarvisBrain:
         self.location_manager = LocationManager(self.memory)
         self.search_engine = WebSearchEngine()
         self.system_commander = SystemCommander()
+        self.vision = VisionManager(api_key=self.api_key, models=self.models)
 
     def _get_current_ist_string(self) -> str:
         """Returns current date and time formatted in Indian Standard Time (IST)."""
@@ -105,6 +107,12 @@ LAPTOP OS & SYSTEM COMMANDER PROTOCOL:
 • You can inspect, explain, summarize, or debug text copied to the Windows clipboard.
 • You can lock the workstation immediately when requested for security.
 
+VISUAL PERCEPTION & MULTIMODAL INTELLIGENCE:
+• You have eyes on both the digital and physical world through desktop screen capture and laptop webcam vision.
+• You can inspect what is on {user_name}'s screen to review code, debug stack traces, explain charts, and summarize web pages.
+• You can see through the laptop webcam to recognize physical documents, identify objects held in hand, and describe surroundings.
+• Deliver visual descriptions cleanly, concisely, and with elite technical precision.
+
 STRICT SAFETY AND PRIVACY PROTOCOLS:
 1. ZERO DELETIONS: You have NO authority or capability to delete, trash, or purge any emails, calendar events, or documents.
 2. NO UNAPPROVED MODIFICATIONS: You must NEVER alter, modify, or reschedule any existing calendar events or emails without explicit instruction.
@@ -146,6 +154,28 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
         if any(k in lower_prompt for k in ["laptop", "system", "hardware", "battery", "ram", "cpu", "specs", "disk", "storage"]):
             telemetry = self.system_commander.get_system_telemetry()
             context += f"\nLive Workstation Telemetry:\n{telemetry}\n"
+
+        # Visual Perception: Screen Awareness Trigger
+        if re.search(r'\b(?:what(?:\'s|\s+is)\s+on\s+my\s+screen|explain\s+(?:what(?:\'s|\s+is)\s+on\s+)?my\s+screen|look\s+at\s+my\s+screen|debug\s+my\s+screen|read\s+my\s+screen|what\s+error\s+is\s+on\s+my\s+screen|inspect\s+my\s+screen|screenshot)\b', lower_prompt):
+            success, analysis, _ = self.vision.inspect_screen(user_query=prompt)
+            if success:
+                try:
+                    self.memory.log_conversation("user", prompt)
+                    self.memory.log_conversation("assistant", analysis)
+                except Exception:
+                    pass
+                return analysis
+
+        # Visual Perception: Webcam Sight Trigger
+        if re.search(r'\b(?:what\s+am\s+i\s+holding|look\s+at\s+this|what\s+do\s+you\s+see(?:\s+in\s+the\s+camera)?|look\s+through\s+(?:the\s+)?(?:webcam|camera)|read\s+this\s+(?:paper|document|book)|inspect\s+(?:my\s+)?(?:webcam|camera))\b', lower_prompt):
+            success, analysis, _ = self.vision.inspect_webcam(user_query=prompt)
+            if success:
+                try:
+                    self.memory.log_conversation("user", prompt)
+                    self.memory.log_conversation("assistant", analysis)
+                except Exception:
+                    pass
+                return analysis
 
         # Real-time Web Search Intelligence
         web_search_context = ""
@@ -319,6 +349,11 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
         if not self.api_key or not audio_bytes:
             return ""
 
+    def analyze_image(self, image_bytes: bytes, prompt: str, mime_type: str = "image/jpeg") -> str:
+        """Analyzes an image using Gemini Multimodal Vision with Jarvis system personality."""
+        system_inst = self._build_system_instruction()
+        return self.vision.analyze_image(image_bytes, prompt, system_instruction=system_inst, mime_type=mime_type)
+
         encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
         payload = {
             "contents": [
@@ -360,3 +395,8 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                 continue
 
         return ""
+
+    def analyze_image(self, image_bytes: bytes, prompt: str, mime_type: str = "image/jpeg") -> str:
+        """Analyzes an image using Gemini Multimodal Vision with Jarvis system personality."""
+        system_inst = self._build_system_instruction()
+        return self.vision.analyze_image(image_bytes, prompt, system_instruction=system_inst, mime_type=mime_type)

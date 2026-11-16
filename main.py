@@ -85,6 +85,14 @@ def run_diagnostics():
     print(f"     ├─ Power Status      : {bat.get('description')}")
     print(f"     ├─ RAM Telemetry     : {mem_stat.get('description')}")
     print(f"     └─ Master Audio      : {vol}% (Muted: {cmd.is_muted()})")
+
+    # 8. Visual Perception & Multimodal Vision
+    screen_ok = brain.vision.capture_screen() is not None
+    cam_bytes = brain.vision.capture_webcam()
+    cam_ok = cam_bytes is not None
+    print(f" [•] Visual Perception    : {'🟢 Ready (Desktop Screen Awareness)' if screen_ok else '⚪ Unavailable'}")
+    print(f"     ├─ Screen Grabber    : {'🟢 Active (PIL ImageGrab)' if screen_ok else '⚪ Inactive'}")
+    print(f"     └─ Webcam Vision     : {'🟢 Camera Stream Online' if cam_ok else '⚪ Standby / Hardware Guarded'}")
     print("\n" + "=" * 60 + "\n")
 
 async def run_cli_briefing():

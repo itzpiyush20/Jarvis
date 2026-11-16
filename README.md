@@ -35,6 +35,11 @@ An autonomous, multi-modal personal assistant designed for mobile productivity v
   - **Workstation Security**: Instant security lock (`"Jarvis, lock the laptop"` or remote Telegram `/lock`) and sleep mode.
   - **Clipboard Intelligence**: Read, explain, or summarize whatever is copied on your Windows clipboard (`"Jarvis, explain what is on my clipboard"`).
 
+- **👁️ Visual Perception & Multimodal Intelligence**:
+  - **Desktop Screen Awareness**: Instant screenshot capture and analysis with Gemini Vision (`"Jarvis, explain what is on my screen"` or `/screen`). Reviews code, debugs terminal errors, and summarizes web pages.
+  - **Webcam Sight**: Live camera frame capture (`"Jarvis, what am I holding?"` or `/webcam`). Recognizes objects, physical documents, books, and surroundings.
+  - **Photo Message Inspector**: Send any photo on Telegram with an optional question to receive an executive visual breakdown and voice note.
+
 - **💾 Persistent SQLite Memory**:
   - Long-term note taking and task management with urgency and due-date tracking.
 
@@ -112,6 +117,8 @@ You have multiple convenient launch modes:
 | `/mute` / `/unmute` | Silence or restore laptop speakers |
 | `/open <app or url>` | Launch apps (VS Code, Chrome, Spotify) or websites on laptop |
 | `/clipboard` | Inspect text currently copied to your Windows clipboard |
+| `/screen [query]` | Capture live desktop screenshot with Gemini multimodal visual analysis |
+| `/webcam [query]` | Capture live webcam photo with object, document, or room description |
 | `/status` | Diagnostic health check of all assistant subsystems |
 
 ---
@@ -127,6 +134,7 @@ Jarvis/
 ├── core/
 │   ├── brain.py                # Gemini API client with audio transcription & failover
 │   ├── system_commander.py     # Win32 native laptop OS controller (audio, telemetry, apps)
+│   ├── vision.py               # Multimodal screen grabber, webcam vision & image reasoning
 │   ├── memory.py               # SQLite storage manager for tasks & notes
 │   ├── location.py             # Dynamic GPS & regional calibration engine
 │   ├── search.py               # Real-time web intelligence extractor

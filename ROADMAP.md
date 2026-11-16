@@ -33,19 +33,22 @@
 
 ---
 
-## 🟡 Phase 3: Visual Perception & Multimodal Intelligence (UPCOMING)
+## 🟢 Phase 3: Visual Perception & Multimodal Intelligence (COMPLETED)
 *Giving Jarvis eyes using your laptop webcam and live screen capture.*
-- [ ] **Webcam Sight ("Jarvis, what am I holding?" / "Look at this")**:
-  - Captures a frame from your webcam on voice command and analyzes it with Gemini multimodal vision.
+- [x] **Webcam Sight ("Jarvis, what am I holding?" / "Look at this")**:
+  - Captures a frame from your webcam on voice or Telegram command and analyzes it with Gemini multimodal vision.
   - Can read physical documents, inspect objects, or describe surroundings.
-- [ ] **Screen Awareness ("Jarvis, explain what is on my screen")**:
+- [x] **Screen Awareness ("Jarvis, explain what is on my screen")**:
   - Instant desktop screenshot analysis for reviewing code, debugging errors, summarizing charts, or drafting replies.
-- [ ] **Presence Detection**:
-  - Optional face / presence verification to greet you when you sit down at your desk.
+  - Remote desktop inspection via Telegram `/screen` with photo and analytical dossier.
+- [x] **Photo Message Inspector**:
+  - Send any photo or document to Jarvis on Telegram for immediate multimodal visual analysis and spoken summary.
+- [x] **Presence Detection**:
+  - Visual presence verification to detect user presence at the workstation.
 
 ---
 
-## 🔵 Phase 4: Stark Holographic Desktop HUD & Waveform Visualizer
+## 🟡 Phase 4: Stark Holographic Desktop HUD & Waveform Visualizer (UPCOMING)
 *A futuristic, minimalist visual interface on your Windows desktop.*
 - [ ] **Transparent Desktop HUD**:
   - A sleek, floating, dark-mode transparent HUD widget on your desktop (customizable or minimized).
