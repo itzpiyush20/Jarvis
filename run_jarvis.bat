@@ -1,17 +1,21 @@
 @echo off
-title Jarvis AI Assistant
+title Jarvis Personal AI Assistant
 cd /d "%~dp0"
 cls
 echo ========================================================
-echo       Jarvis Hands-Free Desktop Voice Assistant
+echo       Jarvis Hands-Free Desktop Voice Assistant 🎙️
 echo ========================================================
 echo.
-echo Wake-word engine is active.
-echo Say "Jarvis" or "Hey Jarvis" to begin speaking.
+echo Assistant: Jarvis
+echo Wake Word : Say "Jarvis" or "Hey Jarvis"
 echo.
-python -u main.py --voice
-if %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo [!] An error occurred while running Jarvis.
-    pause
-)
+
+set "PY_EXE=%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
+if not exist "%PY_EXE%" set "PY_EXE=python"
+
+"%PY_EXE%" -u main.py --voice
+echo.
+echo ========================================================
+echo  Jarvis stopped. Press any key to exit or restart.
+echo ========================================================
+pause
