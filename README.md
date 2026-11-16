@@ -12,8 +12,9 @@ An autonomous, multi-modal personal assistant designed for mobile productivity v
   - Windows IPv4 DNS optimization to eliminate socket timeouts.
 
 - **🎙️ Voice & Conversational Intelligence**:
+  - **Hands-Free Desktop Wake-Word ("Jarvis")**: Call *"Jarvis"* or *"Hey Jarvis"* out loud at your desk. It detects your voice using an offline ONNX wake-word engine, plays an activation chime, records your query, and speaks back through your laptop speakers!
   - **Voice Notes in Telegram**: Speak directly to Jarvis via Telegram voice messages. Jarvis transcribes using Gemini's native audio model and replies with a spoken voice note.
-  - **Neural Text-to-Speech (Edge-TTS)**: British neural voice (`en-GB-RyanNeural`) synthesizing lifelike spoken responses.
+  - **Neural Text-to-Speech (Edge-TTS)**: Lifelike neural voice synthesis with multiple selectable voices (Prabhat Indian 🇮🇳, Brian Global 🌐, Neerja Female 🇮🇳, Christopher US 🇺🇸, Ryan British 🇬🇧).
   - `/voice <query>`: Request spoken audio responses on demand.
 
 - **📅 Google Workspace Integrations**:
@@ -64,10 +65,24 @@ python main.py --status
 ```
 
 ### 5. Launch Jarvis
-Start the full Jarvis assistant service (Telegram bot + background scheduler):
-```bash
-python main.py
-```
+
+You have multiple convenient launch modes:
+
+* **Unified Dual Mode (Desktop Wake-Word + Telegram Bot)**:
+  ```bash
+  python main.py
+  ```
+  *(or `python main.py --all`)*
+
+* **Hands-Free Desktop Voice Only** (Speak *"Jarvis"* at your laptop without Telegram):
+  ```bash
+  python main.py --voice
+  ```
+
+* **Telegram Companion Bot Only**:
+  ```bash
+  python main.py --telegram
+  ```
 
 ---
 

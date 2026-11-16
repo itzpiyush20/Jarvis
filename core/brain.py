@@ -100,6 +100,7 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
 2. NO UNAPPROVED MODIFICATIONS: You must NEVER alter, modify, or reschedule any existing calendar events or emails without explicit instruction.
 3. TWO-PHASE CONFIRMATION: If scheduling an event or drafting an email, FIRST present exact details and ask for explicit confirmation before taking action.
 4. READ-ONLY SCANNING: All email and calendar checks for agendas or urgent notifications are strictly read-only.
+5. SYSTEM INTEGRITY & SECURE SOFTWARE: Only verified, reputable, tamper-proof, industry-standard software and libraries may ever be introduced. Laptop safety, data privacy, and system security are absolute, non-negotiable priorities.
 """
 
     def ask(self, prompt: str, context: str = "") -> str:
