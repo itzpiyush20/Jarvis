@@ -6,6 +6,7 @@ import wave
 import queue
 import logging
 import threading
+import socket
 from pathlib import Path
 import numpy as np
 
@@ -33,6 +34,19 @@ from voice.chimes import play_wake_chime, play_thinking_chime, play_audio_file
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 logger = logging.getLogger("JarvisVoiceListener")
+
+_INSTANCE_LOCK_SOCKET = None
+
+def acquire_instance_lock(port: int = 47281) -> bool:
+    """Ensures only a single instance of the Jarvis voice listener runs at a time."""
+    global _INSTANCE_LOCK_SOCKET
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("127.0.0.1", port))
+        _INSTANCE_LOCK_SOCKET = s
+        return True
+    except (socket.error, OSError):
+        return False
 
 class DesktopVoiceAssistant:
     """
@@ -262,6 +276,16 @@ class DesktopVoiceAssistant:
 
 def start_voice_service():
     """Convenience launcher for the standalone desktop voice assistant."""
+    if not acquire_instance_lock():
+        print("[*] Jarvis Voice Assistant is already active and listening in the background.")
+        return
+
+    pid_file = config.AUDIO_DIR / "jarvis.pid"
+    try:
+        pid_file.write_text(str(os.getpid()))
+    except Exception:
+        pass
+
     try:
         assistant = DesktopVoiceAssistant()
         assistant.listen_loop()
@@ -273,6 +297,11 @@ def start_voice_service():
             pass
     except Exception as e:
         print(f"\n[!] Could not start desktop voice service: {e}")
+    finally:
+        try:
+            pid_file.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

@@ -1,6 +1,24 @@
 import os
+import sys
 import socket
 from pathlib import Path
+
+# Base directory
+BASE_DIR = Path(__file__).resolve().parent
+
+# Ensure stdout/stderr exist in windowless execution (pythonw.exe on Windows)
+if sys.stdout is None:
+    try:
+        (BASE_DIR / "temp_audio").mkdir(exist_ok=True)
+        sys.stdout = open(BASE_DIR / "temp_audio" / "jarvis_voice.log", "a", encoding="utf-8")
+    except Exception:
+        sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    try:
+        (BASE_DIR / "temp_audio").mkdir(exist_ok=True)
+        sys.stderr = open(BASE_DIR / "temp_audio" / "jarvis_voice.log", "a", encoding="utf-8")
+    except Exception:
+        sys.stderr = open(os.devnull, "w")
 
 # ========================================================
 # NETWORK OPTIMIZATION: Force IPv4 DNS resolution
@@ -11,9 +29,6 @@ _orig_getaddrinfo = socket.getaddrinfo
 def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
 socket.getaddrinfo = _ipv4_only_getaddrinfo
-
-# Base directory
-BASE_DIR = Path(__file__).resolve().parent
 
 def load_env():
     """Loads .env file into os.environ with fallback if python-dotenv isn't installed."""
