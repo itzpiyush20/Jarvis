@@ -15,9 +15,9 @@ from core.vision import VisionManager
 
 # Tested and responsive models for the Gemini Free Tier
 PREFERRED_MODELS = [
-    "gemini-flash-lite-latest",
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
+    "gemini-flash-lite-latest",
 ]
 
 class JarvisBrain:
@@ -464,11 +464,13 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                 headers={"Content-Type": "application/json"}
             )
             try:
-                with urllib.request.urlopen(req, timeout=12) as response:
+                with urllib.request.urlopen(req, timeout=8) as response:
                     result = json.loads(response.read().decode("utf-8"))
                     candidates = result.get("candidates", [])
                     if candidates:
-                        return candidates[0]["content"]["parts"][0]["text"].strip()
+                        text = candidates[0]["content"]["parts"][0]["text"].strip()
+                        if text:
+                            return text
             except Exception as e:
                 print(f"[-] Transcribe attempt with {model} failed: {e}")
                 continue

@@ -299,6 +299,7 @@ class DesktopVoiceAssistant:
         # 1. Transcribe audio using Gemini Native Audio
         logger.info("🧠 [TRANSCRIBING] Transcribing speech via Gemini Native Audio...")
         transcription = self.brain.transcribe_audio(wav_bytes, mime_type="audio/wav")
+        logger.info(f"🧠 [TRANSCRIBED RAW]: '{transcription}'")
         clean_query = transcription.strip().strip('"\'') if transcription else ""
 
         # If user just called "Jarvis" and paused, answer immediately with instant acknowledgment
