@@ -216,10 +216,11 @@ class DesktopVoiceAssistant:
         """
         Records the user's spoken voice command after wake-word activation.
         Uses adaptive dynamic ambient baseline calibration to catch soft and normal speech.
+        Allows flexible, long speech (from quick questions up to 2-3 minutes of continuous speaking).
         """
         logger.info("🎙️ [LISTENING] Jarvis is listening for your command...")
         notify_user("🎙️ Jarvis", "Listening for your command, Sir...")
-        show_hud_listening("Listening for your command...")
+        show_hud_listening("Listening... Speak freely, Sir")
 
         recorded_frames = []
         # Pre-populate with recent chunks in queue so no words right after wake-word are lost
@@ -239,9 +240,13 @@ class DesktopVoiceAssistant:
 
         speech_started = False
         silent_chunks = 0
-        max_silent_chunks = int(0.55 / 0.08)  # ~550ms silence after speech concludes command (fast cutoff)
-        timeout_chunks = int(2.5 / 0.08)     # 2.5s window for speech to begin
-        max_duration_chunks = int(8.0 / 0.08) # 8s maximum command limit
+        # Comfortable natural pause threshold: ~1.5s of real silence after speech before concluding
+        # (Allows natural human thinking pauses, commas, taking a breath without getting cut off)
+        max_silent_chunks = int(1.5 / 0.08)  
+        # Generous initial window: 5.0s window for the user to start speaking after wake word
+        timeout_chunks = int(5.0 / 0.08)     
+        # Supports long, detailed responses: up to 180 seconds (3 minutes) of continuous speech
+        max_duration_chunks = int(180.0 / 0.08) 
         total_chunks = len(recorded_frames)
 
         while self.running and total_chunks < max_duration_chunks:
@@ -259,6 +264,7 @@ class DesktopVoiceAssistant:
                 if not speech_started:
                     logger.info("🗣️ [SPEECH DETECTED] User speaking...")
                     speech_started = True
+                    show_hud_listening("I'm listening...")
                 silent_chunks = 0
             else:
                 if speech_started:
@@ -268,7 +274,7 @@ class DesktopVoiceAssistant:
                         break
                 else:
                     if total_chunks >= timeout_chunks:
-                        logger.info("⏱️ [TIMEOUT] Concluding audio capture.")
+                        logger.info("⏱️ [TIMEOUT] No speech detected after wake word.")
                         break
 
         if len(recorded_frames) < 6:
