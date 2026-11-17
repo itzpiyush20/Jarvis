@@ -428,9 +428,33 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
             except Exception:
                 pass
 
-    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
-        """Transcribes audio speech to text using Gemini's native audio capabilities."""
-        if not self.api_key or not audio_bytes:
+    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/wav") -> str:
+        """
+        Transcribes audio speech to text using ultra-fast, robust dual-engine processing:
+        1. Google Cloud Speech Recognition API (sub-second, battle-tested for voice assistants).
+        2. Gemini Multimodal Audio fallback if required.
+        """
+        if not audio_bytes:
+            return ""
+
+        # Tier 1: Fast, rock-solid SpeechRecognition engine (Google Assistant / Android STT standard)
+        try:
+            import speech_recognition as sr
+            import io
+            recognizer = sr.Recognizer()
+            wav_file = io.BytesIO(audio_bytes)
+            with sr.AudioFile(wav_file) as source:
+                audio_data = recognizer.record(source)
+            # recognize_google is instant, free, robust, and specifically trained on conversational speech
+            text = recognizer.recognize_google(audio_data, language="en-IN")
+            if text and len(text.strip()) > 0:
+                return text.strip()
+        except Exception as e:
+            # Silence, unintelligible, or offline fallback to Gemini
+            pass
+
+        # Tier 2: Gemini Native Multimodal Audio Fallback
+        if not self.api_key:
             return ""
 
         encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
@@ -472,7 +496,6 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                         if text:
                             return text
             except Exception as e:
-                print(f"[-] Transcribe attempt with {model} failed: {e}")
                 continue
 
         return ""
