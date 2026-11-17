@@ -16,8 +16,8 @@ from core.vision import VisionManager
 # Tested and responsive models for the Gemini Free Tier
 PREFERRED_MODELS = [
     "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
     "gemini-flash-lite-latest",
+    "gemini-3.1-flash-lite",
 ]
 
 class JarvisBrain:
@@ -448,7 +448,7 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                             }
                         },
                         {
-                            "text": "Transcribe the spoken words in this voice note accurately. Return ONLY the transcribed text without quotes, markdown headers, or explanations."
+                            "text": "Transcribe the spoken words in this audio recording accurately. Return ONLY the exact transcribed text without quotes, markdown headers, timestamps, or explanations. If there is no audible speech or only silence, return NONE."
                         }
                     ]
                 }
@@ -472,9 +472,11 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                     candidates = result.get("candidates", [])
                     if candidates:
                         text = candidates[0]["content"]["parts"][0]["text"].strip()
-                        if text:
-                            return text
-            except Exception as e:
+                        # Filter timestamps (e.g. 00:00, [00:00]), quotes, or NONE
+                        clean = re.sub(r'\[?\b\d{1,2}:\d{2}(?::\d{2})?\b\]?', '', text).strip().strip('"\'')
+                        if clean and clean.upper() != "NONE" and len(clean) >= 2:
+                            return clean
+            except Exception:
                 continue
 
         return ""

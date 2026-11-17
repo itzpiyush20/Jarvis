@@ -95,6 +95,7 @@ class DesktopVoiceAssistant:
 
         # Software mic gain — amplifies quiet laptop mics before processing
         self.mic_gain = 1.0  # Will be calibrated in _calibrate_mic_gain()
+        self.ambient_rms = 1.0
 
         self.brain = JarvisBrain()
         self.memory = MemoryManager()
@@ -158,28 +159,31 @@ class DesktopVoiceAssistant:
 
             if calibration_frames:
                 all_audio = np.concatenate(calibration_frames)
-                ambient_rms = np.sqrt(np.mean(all_audio ** 2))
-                peak = np.max(np.abs(all_audio))
+                ambient_rms = float(np.sqrt(np.mean(all_audio ** 2)))
+                peak = float(np.max(np.abs(all_audio)))
+                self.ambient_rms = max(ambient_rms, 0.5)
 
                 logger.info(f"    Ambient RMS: {ambient_rms:.1f}, Peak: {peak:.0f}")
 
                 if ambient_rms < 5.0:
                     # Very quiet mic — needs significant boost
                     # Target: amplify so that normal speech (~50x ambient) reaches RMS ~500
-                    self.mic_gain = min(20.0, max(5.0, 300.0 / max(ambient_rms * 30, 1.0)))
+                    self.mic_gain = min(25.0, max(5.0, 300.0 / max(ambient_rms * 30, 1.0)))
                 elif ambient_rms < 50.0:
                     # Somewhat quiet
-                    self.mic_gain = min(10.0, max(2.0, 300.0 / max(ambient_rms * 10, 1.0)))
+                    self.mic_gain = min(12.0, max(2.0, 300.0 / max(ambient_rms * 10, 1.0)))
                 else:
                     # Mic is already loud enough
                     self.mic_gain = 1.0
 
-                logger.info(f"[+] Auto-calibrated MIC_GAIN: {self.mic_gain:.1f}x")
+                logger.info(f"[+] Auto-calibrated MIC_GAIN: {self.mic_gain:.1f}x (Ambient RMS: {self.ambient_rms:.2f})")
             else:
                 self.mic_gain = 10.0
+                self.ambient_rms = 1.0
                 logger.warning("[!] No calibration data captured. Using default gain: 10x")
         except Exception as e:
             self.mic_gain = 10.0
+            self.ambient_rms = 1.0
             logger.warning(f"[!] Mic calibration failed ({e}). Using default gain: 10x")
 
     def _amplify(self, audio_int16: np.ndarray) -> np.ndarray:
@@ -233,53 +237,48 @@ class DesktopVoiceAssistant:
                 ctx += f"\nWorkstation Clipboard Content:\n\"\"\"\n{clip[:2000]}\n\"\"\"\n"
         return ctx
 
-    def _record_command(self, stream: sd.InputStream) -> bytes | None:
+    def _record_command(self, stream: sd.InputStream, prompt_msg: str = "Listening... Speak freely, Sir") -> bytes | None:
         """
         Records the user's spoken voice command after wake-word activation.
-        Uses adaptive dynamic ambient baseline calibration to catch soft and normal speech.
-        Allows flexible, long speech (from quick questions up to 2-3 minutes of continuous speaking).
+        Uses software gain amplification, dynamic speech VAD, natural pause tolerance,
+        and audio peak normalization to produce crystal-clear recordings for STT.
         """
-        logger.info("🎙️ [LISTENING] Jarvis is listening for your command...")
+        logger.info(f"🎙️ [LISTENING] {prompt_msg}")
         notify_user("🎙️ Jarvis", "Listening for your command, Sir...")
-        show_hud_listening("Listening... Speak freely, Sir")
+        show_hud_listening(prompt_msg)
 
         recorded_frames = []
-        # Pre-populate with recent chunks in queue so no words right after wake-word are lost
-        while not self.audio_queue.empty():
-            try:
-                recorded_frames.append(self.audio_queue.get_nowait())
-            except queue.Empty:
-                break
 
-        # Compute dynamic ambient noise floor from the first available frames
-        sample_energies = [np.sqrt(np.mean(f.astype(np.float32) ** 2)) for f in recorded_frames if len(f) > 0]
-        ambient_baseline = np.mean(sample_energies) if sample_energies else 2.0
-        # Dynamic voice threshold: baseline * 1.15 or minimum 3.0 for responsive soft-speech pickup
-        voice_threshold = max(ambient_baseline * 1.15, 3.0)
+        # Baseline noise level on amplified audio
+        baseline_rms = getattr(self, "ambient_rms", 1.0) * self.mic_gain
+        # Sensitive voice threshold on amplified audio: catches soft and normal speech
+        voice_threshold = max(baseline_rms * 1.5, 25.0)
 
-        logger.debug(f"Ambient baseline RMS: {ambient_baseline:.1f}, Voice threshold: {voice_threshold:.1f}")
+        logger.debug(f"Baseline amplified RMS: {baseline_rms:.1f}, Voice threshold: {voice_threshold:.1f}")
 
         speech_started = False
         silent_chunks = 0
-        # Comfortable natural pause threshold: ~1.5s of real silence after speech before concluding
-        # (Allows natural human thinking pauses, commas, taking a breath without getting cut off)
-        max_silent_chunks = int(1.5 / 0.08)  
-        # Generous initial window: 5.0s window for the user to start speaking after wake word
-        timeout_chunks = int(5.0 / 0.08)     
-        # Supports long, detailed responses: up to 180 seconds (3 minutes) of continuous speech
-        max_duration_chunks = int(180.0 / 0.08) 
-        total_chunks = len(recorded_frames)
+        # Natural pause tolerance: ~1.4s of silence after speech concludes command
+        chunk_sec = self.chunk_size / self.sample_rate
+        max_silent_chunks = int(1.4 / chunk_sec)
+        # 4.5s window for speech to begin
+        timeout_chunks = int(4.5 / chunk_sec)
+        # Up to 180 seconds for long instructions
+        max_duration_chunks = int(180.0 / chunk_sec)
+        total_chunks = 0
 
         while self.running and total_chunks < max_duration_chunks:
             try:
-                chunk = self.audio_queue.get(timeout=0.15)
+                raw_chunk = self.audio_queue.get(timeout=0.15)
             except queue.Empty:
                 continue
 
             total_chunks += 1
-            recorded_frames.append(chunk)
+            # Apply software mic amplification
+            amplified_chunk = self._amplify(raw_chunk)
+            recorded_frames.append(amplified_chunk)
 
-            rms = np.sqrt(np.mean(chunk.astype(np.float32) ** 2))
+            rms = np.sqrt(np.mean(amplified_chunk.astype(np.float32) ** 2))
 
             if rms > voice_threshold:
                 if not speech_started:
@@ -295,14 +294,20 @@ class DesktopVoiceAssistant:
                         break
                 else:
                     if total_chunks >= timeout_chunks:
-                        logger.info("⏱️ [TIMEOUT] No speech detected after wake word.")
+                        logger.info("⏱️ [TIMEOUT] No speech detected in initial window.")
                         break
 
-        if len(recorded_frames) < 6:
+        if not speech_started or len(recorded_frames) < 6:
             return None
 
-        # Concatenate PCM audio and wrap in WAV format
-        full_audio = np.concatenate(recorded_frames, axis=0)
+        # Concatenate and peak-normalize audio so Gemini STT receives full, clear volume
+        full_audio = np.concatenate(recorded_frames, axis=0).flatten()
+        peak = float(np.max(np.abs(full_audio)))
+        if peak > 20.0:
+            target_peak = 22000.0  # Safe high volume for STT models without distortion
+            norm_gain = min(target_peak / peak, 50.0)
+            full_audio = np.clip(full_audio.astype(np.float32) * norm_gain, -32768, 32767).astype(np.int16)
+
         wav_buffer = io.BytesIO()
         with wave.open(wav_buffer, "wb") as wf:
             wf.setnchannels(1)
@@ -312,21 +317,22 @@ class DesktopVoiceAssistant:
 
         return wav_buffer.getvalue()
 
-    def process_voice_interaction(self, wav_bytes: bytes):
+    def process_voice_interaction(self, wav_bytes: bytes | None, stream: sd.InputStream = None):
         """Transcribes audio, queries Gemini brain, synthesizes speech, and plays response."""
-        play_thinking_chime()
-        show_hud_thinking("Transcribing speech...")
+        clean_query = ""
 
-        # 1. Transcribe audio using Gemini Native Audio
-        logger.info("🧠 [TRANSCRIBING] Transcribing speech via Gemini Native Audio...")
-        transcription = self.brain.transcribe_audio(wav_bytes, mime_type="audio/wav")
-        logger.info(f"🧠 [TRANSCRIBED RAW]: '{transcription}'")
-        clean_query = transcription.strip().strip('"\'') if transcription else ""
+        if wav_bytes:
+            play_thinking_chime()
+            show_hud_thinking("Transcribing speech...")
+            logger.info("🧠 [TRANSCRIBING] Transcribing speech via Gemini Native Audio...")
+            transcription = self.brain.transcribe_audio(wav_bytes, mime_type="audio/wav")
+            logger.info(f"🧠 [TRANSCRIBED RAW]: '{transcription}'")
+            clean_query = transcription.strip().strip('"\'') if transcription else ""
 
-        # If user just called "Jarvis" and paused, answer immediately with instant acknowledgment
+        # If user just called "Jarvis" and paused, greet them and KEEP LISTENING for their command!
         if not clean_query or len(clean_query) < 2:
             logger.info("[*] Wake word acknowledged without further command. Responding with verbal greeting.")
-            show_hud_speaking("At your service, Sir.")
+            show_hud_speaking("At your service, Sir. How may I assist you?")
             if self.ack_audio_path.exists():
                 play_audio_file(self.ack_audio_path, blocking=True)
             else:
@@ -335,8 +341,35 @@ class DesktopVoiceAssistant:
                     play_audio_file(audio_path, blocking=True)
                 except Exception as e:
                     logger.error(f"[-] Acknowledgment playback error: {e}")
-            hide_hud()
-            return
+
+            # Keep listening for the user's actual instruction rather than terminating!
+            if stream and self.running:
+                # Flush audio queue to discard greeting echo
+                while not self.audio_queue.empty():
+                    try:
+                        self.audio_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                time.sleep(0.1)
+
+                followup_wav = self._record_command(stream, prompt_msg="Listening... Speak your command, Sir")
+                if followup_wav:
+                    play_thinking_chime()
+                    show_hud_thinking("Processing your instruction...")
+                    followup_text = self.brain.transcribe_audio(followup_wav, mime_type="audio/wav")
+                    clean_followup = followup_text.strip().strip('"\'') if followup_text else ""
+                    if clean_followup and len(clean_followup) >= 2:
+                        clean_query = clean_followup
+                    else:
+                        logger.info("[*] No follow-up command detected. Returning to standby.")
+                        hide_hud()
+                        return
+                else:
+                    hide_hud()
+                    return
+            else:
+                hide_hud()
+                return
 
         print(f"\n" + "—" * 60)
         print(f" 🗣️ You: {clean_query}")
@@ -466,13 +499,20 @@ class DesktopVoiceAssistant:
                             notify_user("🔔 Jarvis Awake", f"Wake-word detected! Listening...")
                             consecutive_hits = 0
                             
-                            # Play wake chime non-blocking so recording starts instantly without delay
+                            # Play wake alert chime and wait briefly for it to complete
                             play_wake_chime()
+                            time.sleep(0.18)
+
+                            # Flush audio queue so chime and previous wake word audio are completely discarded
+                            while not self.audio_queue.empty():
+                                try:
+                                    self.audio_queue.get_nowait()
+                                except queue.Empty:
+                                    break
 
                             # Record command
                             wav_data = self._record_command(stream)
-                            if wav_data:
-                                self.process_voice_interaction(wav_data)
+                            self.process_voice_interaction(wav_data, stream=stream)
                             
                             # Reset model internal buffers after interaction
                             self.oww_model.reset()
