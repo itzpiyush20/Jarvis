@@ -15,8 +15,8 @@ from core.vision import VisionManager
 
 # Tested and responsive models for the Gemini Free Tier
 PREFERRED_MODELS = [
-    "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-flash-lite-latest",
 ]
 
@@ -442,15 +442,20 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
             import speech_recognition as sr
             import io
             recognizer = sr.Recognizer()
+            recognizer.energy_threshold = 300
+            recognizer.dynamic_energy_threshold = True
             wav_file = io.BytesIO(audio_bytes)
             with sr.AudioFile(wav_file) as source:
                 audio_data = recognizer.record(source)
-            # recognize_google is instant, free, robust, and specifically trained on conversational speech
-            text = recognizer.recognize_google(audio_data, language="en-IN")
-            if text and len(text.strip()) > 0:
-                return text.strip()
+            # Try en-IN first, then general en-US
+            for lang in ["en-IN", "en-US"]:
+                try:
+                    text = recognizer.recognize_google(audio_data, language=lang)
+                    if text and len(text.strip()) > 0:
+                        return text.strip()
+                except Exception:
+                    continue
         except Exception as e:
-            # Silence, unintelligible, or offline fallback to Gemini
             pass
 
         # Tier 2: Gemini Native Multimodal Audio Fallback
