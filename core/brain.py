@@ -430,36 +430,10 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
 
     def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/wav") -> str:
         """
-        Transcribes audio speech to text using ultra-fast, robust dual-engine processing:
-        1. Google Cloud Speech Recognition API (sub-second, battle-tested for voice assistants).
-        2. Gemini Multimodal Audio fallback if required.
+        Transcribes audio speech to text directly via Gemini 3.5 Flash-Lite
+        without requiring extra local package dependencies.
         """
-        if not audio_bytes:
-            return ""
-
-        # Tier 1: Fast, rock-solid SpeechRecognition engine (Google Assistant / Android STT standard)
-        try:
-            import speech_recognition as sr
-            import io
-            recognizer = sr.Recognizer()
-            recognizer.energy_threshold = 300
-            recognizer.dynamic_energy_threshold = True
-            wav_file = io.BytesIO(audio_bytes)
-            with sr.AudioFile(wav_file) as source:
-                audio_data = recognizer.record(source)
-            # Try en-IN first, then general en-US
-            for lang in ["en-IN", "en-US"]:
-                try:
-                    text = recognizer.recognize_google(audio_data, language=lang)
-                    if text and len(text.strip()) > 0:
-                        return text.strip()
-                except Exception:
-                    continue
-        except Exception as e:
-            pass
-
-        # Tier 2: Gemini Native Multimodal Audio Fallback
-        if not self.api_key:
+        if not self.api_key or not audio_bytes:
             return ""
 
         encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
@@ -493,7 +467,7 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                 headers={"Content-Type": "application/json"}
             )
             try:
-                with urllib.request.urlopen(req, timeout=8) as response:
+                with urllib.request.urlopen(req, timeout=10) as response:
                     result = json.loads(response.read().decode("utf-8"))
                     candidates = result.get("candidates", [])
                     if candidates:
