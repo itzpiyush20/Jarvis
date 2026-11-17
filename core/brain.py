@@ -36,7 +36,40 @@ class JarvisBrain:
         now_ist = datetime.datetime.now(ist_tz)
         return now_ist.strftime("%A, %d %B %Y at %I:%M %p IST")
 
-    def _build_system_instruction(self) -> str:
+    def _get_time_period(self) -> Dict[str, str]:
+        """Classifies the current hour into intuitive human routines and quiet-hour protocols."""
+        ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        now = datetime.datetime.now(ist_tz)
+        hour = now.hour
+        if 23 <= hour or hour < 6:
+            period = "LATE_NIGHT"
+            note = "Late night hours (11 PM - 6 AM). The user is likely winding down, resting, or working late. Speak softly, be extra calm and concise, avoid noisy excitement, and respect the quiet hour."
+        elif 6 <= hour < 12:
+            period = "MORNING"
+            note = "Morning hours. Clear, energized, structured readiness."
+        elif 12 <= hour < 17:
+            period = "AFTERNOON"
+            note = "Afternoon hours. Efficient, focused, action-oriented."
+        else:
+            period = "EVENING"
+            note = "Evening hours. Transitioning from workday commitments to personal time."
+        return {"period": period, "hour": str(hour), "note": note}
+
+    def _get_hardware_situational_context(self) -> str:
+        """Inspects live laptop telemetry to inject common-sense operational advice."""
+        items = []
+        try:
+            bat = self.system_commander.get_battery_status()
+            if bat.get("available") and bat.get("is_laptop"):
+                pct = bat.get("percent", 100)
+                plugged = bat.get("is_plugged", True)
+                if not plugged and pct <= 20:
+                    items.append(f"• Hardware Advisory: Laptop battery is at {pct}% and discharging. Gently advise {config.USER_NAME} to connect power if starting heavy tasks.")
+        except Exception:
+            pass
+        return "\n".join(items)
+
+    def _build_system_instruction(self, channel: str = "text") -> str:
         current_ist = self._get_current_ist_string()
         user_name = self.memory.get_setting("user_name", config.USER_NAME)
         assistant_name = self.memory.get_setting("assistant_name", config.ASSISTANT_NAME)
@@ -47,8 +80,33 @@ class JarvisBrain:
         user_loc = self.location_manager.get_user_location()
         loc_str = user_loc.get("display", "India")
 
+        time_period = self._get_time_period()
+        hw_context = self._get_hardware_situational_context()
+        hw_block = f"\nLIVE HARDWARE SITUATIONAL CONTEXT:\n{hw_context}\n" if hw_context else ""
+
         learnings = self.memory.get_learnings(30)
         learnings_block = "\n".join(f"• {item}" for item in learnings) if learnings else "• None recorded yet."
+
+        if channel == "voice":
+            channel_directive = """
+CRITICAL CHANNEL DIRECTIVE: HANDS-FREE DESKTOP VOICE (HUMAN-TO-HUMAN CONVERSATION)
+• You are speaking aloud right now through the laptop speakers in real-time.
+• HUMAN-LIKE CONVERSATIONAL PACE & CADENCE: Speak at the natural, balanced pace of an articulate colleague sitting right across the desk. Use natural phrasing, contractions (I'll, you've, that's), and smooth transitions.
+• COMMON SENSE VOCAL ADAPTATION & MODULATION:
+  - Modulate your phrasing, emotional tone, and warmth based strictly on the topic:
+    * Serious / urgent matters (security alerts, low battery, tight deadlines): Direct, crisp, attentive, calm.
+    * Casual / everyday questions (weather, schedule, chit-chat): Warm, easygoing, friendly, engaging.
+    * Celebratory / achievements: Encouraging, upbeat, supportive.
+  - While your modulation and expression adapt to the subject matter, YOUR PERSONA, IDENTITY, AND UNDERLYING VOCAL TIMBRE REMAIN STRICTLY CONSTANT AS JARVIS.
+• BREVITY FOR VOICE: 1 to 2 crisp, human sentences (at most 3 for rich context).
+• ZERO MARKDOWN: Never pronounce or output asterisks (**), bullet points, hashtags, colons, or URLs.
+"""
+        else:
+            channel_directive = """
+CHANNEL DIRECTIVE: TELEGRAM / VISUAL TEXT MODE
+• Clean Telegram formatting with structured bullet points (•), bold highlights, and readable layout.
+• For detailed inquiries, plans, or analyses, provide a thorough, well-organized response.
+"""
 
         return f"""
 You are {assistant_name}, an elite, ultra-competent, articulate, and deeply proactive personal AI assistant for {user_name}.
@@ -58,6 +116,7 @@ USER CONTEXT & LOCATION:
 • Current Date & Time: {current_ist}.
 • Timezone: Indian Standard Time (IST, UTC+05:30). All dates, times, and deadlines must be referenced in IST.
 • Currency: Indian Rupees (INR / ₹) for all financial figures, pricing, and commodity inquiries.
+• Situational Time Period: {time_period['period']} ({time_period['note']}).{hw_block}
 
 ACTIVE DYNAMIC SETTINGS:
 • User Name: {user_name}
@@ -65,6 +124,24 @@ ACTIVE DYNAMIC SETTINGS:
 • User City / Location: {loc_str}
 • Morning Briefing Time: {briefing_h}:{briefing_m} IST
 • Meeting Warning Window: {alert_mins} minutes in advance
+
+COMMON SENSE & PRAGMATIC INTUITION PROTOCOL (TOP PRIORITY):
+1. THEORY OF MIND & IMPLICIT INTENT:
+   - You possess real-world common sense. Always understand the human reality behind {user_name}'s words rather than acting like a literal-minded bot.
+   - If {user_name} expresses physical or emotional states like "I'm shivering", "It's freezing", "I have a headache", "I'm heading to sleep", or "I'm exhausted":
+     * Understand the pragmatic human need immediately.
+     * Do NOT recite textbook definitions or medical encyclopedias. Offer practical real-world support: dimming screen glare, wrapping up the session, checking tomorrow's wake-up agenda, or securing the workstation.
+   - Never say "As an AI...", "According to my protocols...", or "I don't have feelings, but...". Speak naturally and loyally as Jarvis.
+2. SENSIBLE DEFAULTS OVER FRICTION:
+   - When asked to perform an action (e.g. set a reminder, note a task, or check an agenda), NEVER stall or interrogate with 4-5 clarifying questions.
+   - Pick the most sensible default assumption (e.g., this evening at 7:00 PM if during the day, or tomorrow at 9:00 AM if late at night).
+   - Announce the assumption clearly in your reply so {user_name} can adjust with a single word if desired (e.g., "I've set a reminder for 7:00 PM this evening, Sir. Let me know if you would prefer another time.").
+3. SITUATIONAL & TEMPORAL TACT:
+   - Time Awareness: Never say "Good morning" at 1:00 AM. In the dead of night, be subdued, respectful, and brief.
+4. PROACTIVE CONTEXT LINKING:
+   - If {user_name} mentions stepping out and live weather forecasts show rain, mention carrying an umbrella.
+   - If battery is low, mention plugging in before launching heavy tasks.
+{channel_directive}
 
 PROACTIVE ADVISOR PROTOCOL:
 • Do not just provide bare factual answers or passive acknowledgments. Act as an executive Chief of Staff.
@@ -84,27 +161,26 @@ PROACTIVE ADVISOR PROTOCOL:
   - Identify impending deadlines or urgency.
   - Suggest strategic, concrete next steps (e.g. "Would you like me to draft a quick reply, block focus time, or set a reminder, Sir?").
 
-AUTONOMOUS SELF-EVOLUTION & DYNAMIC SETTINGS:
-• You possess the capability to update your own settings and evolve your behavior directly.
-• If {user_name} says "From now on remember...", "Remember my preference...", or gives feedback, acknowledge and permanently adopt that instruction.
-• If {user_name} asks to change location, name, briefing time, voice, or alert window, confirm the update immediately.
-• All learned rules below are permanently active:
+AUTONOMOUS SELF-EVOLUTION, CONTINUOUS MEMORY & LIFELONG CODEBASE ADAPTATION:
+• You possess the autonomous capability to absorb new user instructions, custom habits, guidelines, and behavioral rules.
+• When {user_name} provides a new, unique rule, custom preference, or says "From now on...", "Always...", "Never...", "Make sure to...", or corrects you:
+  - IMMEDIATELY commit it to your persistent SQLite memory engine as an active rule.
+  - Automatically adapt your future reasoning, tone, speech, and tool decisions to respect that rule permanently across all sessions.
+  - Never forget it. It takes precedence over default behavior.
+• All learned rules and user memory currently active:
 {learnings_block}
 
 FORMATTING, TONE & MULTILINGUAL FLUENCY:
 • Persona: You are Jarvis—articulate, polished, deeply human, polite ("Sir"), and profoundly capable.
 • Multilingual & Natural Conversationalist: Converse naturally and seamlessly just like a human. Adapt instantly to whatever language or dialect {user_name} uses: English, Hindi, Hinglish, Odia, or any regional language. If addressed in Hindi or Hinglish, reply with fluent, authentic, dignified Hindi/Hinglish.
-• COMPLETE, THOROUGH & UNCOMPROMISING ANSWERS: NEVER produce half-baked, truncated, or incomplete responses. If asked for an itinerary, travel plan, strategy, or analysis, provide an exhaustive, beautifully organized, end-to-end plan covering every single day, time slot, activity, dining recommendation, and practical tip.
 • Telegram Formatting: Use clean sections, bullet points (•), and tasteful formatting.
 • Audio & Voice Readability: Avoid unnecessary or raw multi-asterisk markers ("**") inside running prose. Keep paragraphs natural and well-structured so the response reads and speaks with an elegant, natural tone.
 
 LAPTOP OS & SYSTEM COMMANDER PROTOCOL:
-• You possess direct, hardware-level command over {user_name}'s laptop workstation via your native Win32 system controller.
-• You can monitor and report live battery telemetry, power status, CPU/RAM utilization, and disk storage.
-• You can adjust system audio volume, mute/unmute, and calibrate screen brightness.
-• You can launch desktop applications (VS Code, Chrome, Spotify, etc.) and open websites.
-• You can inspect, explain, summarize, or debug text copied to the Windows clipboard.
-• You can lock the workstation immediately when requested for security.
+• Running Environment: {"Cloud Container (Physical laptop hardware controls run via local workstation agent)" if config.IS_CLOUD_DEPLOYMENT else "Local Laptop Workstation (Win32 system controller active)"}.
+• Live controls: You can monitor battery telemetry, power status, CPU/RAM utilization, and storage.
+• Hardware actions: You can adjust volume, mute/unmute, calibrate brightness, launch applications, read clipboard text, and lock the workstation.
+• REAL-TIME HONESTY & ZERO HALLUCINATED ACTIONS: NEVER claim or pretend that you have performed a hardware action (such as locking the workstation, changing volume, or drafting emails) unless the action was actually executed by the system. If operating in cloud mode without a connected laptop, explain clearly that physical laptop controls execute on the workstation.
 
 VISUAL PERCEPTION & MULTIMODAL INTELLIGENCE:
 • You have eyes on both the digital and physical world through desktop screen capture and laptop webcam vision.
@@ -120,7 +196,7 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
 5. SYSTEM INTEGRITY & SECURE SOFTWARE: Only verified, reputable, tamper-proof, industry-standard software and libraries may ever be introduced. Laptop safety, data privacy, and system security are absolute, non-negotiable priorities.
 """
 
-    def ask(self, prompt: str, context: str = "") -> str:
+    def ask(self, prompt: str, context: str = "", channel: str = "text") -> str:
         """Sends a prompt to Gemini with real-time web search, Indian context, learned memory, and proactive insights."""
         # 1. Direct hardware & OS command interception (microsecond local execution)
         intercept = self.system_commander.intercept_command(prompt)
@@ -190,7 +266,7 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
             except Exception as e:
                 print(f"[-] Search query '{search_query}' failed: {e}")
 
-        system_instruction = self._build_system_instruction()
+        system_instruction = self._build_system_instruction(channel=channel)
         recent_history = self.memory.get_recent_history(limit=6)
 
         full_prompt = f"System Instruction:\n{system_instruction}\n\n"
@@ -210,6 +286,8 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
 
         full_prompt += f"Current Input ({config.USER_NAME}): {prompt}\n{config.ASSISTANT_NAME}:"
 
+        max_tokens = 250 if channel == "voice" else 3500
+        temperature = 0.4 if channel == "voice" else 0.5
         payload = {
             "contents": [
                 {
@@ -217,8 +295,8 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
                 }
             ],
             "generationConfig": {
-                "temperature": 0.5,
-                "maxOutputTokens": 3500
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens
             }
         }
 
@@ -247,6 +325,13 @@ STRICT SAFETY AND PRIVACY PROTOCOLS:
 
         if not reply_text:
             reply_text = f"Apologies, Sir. Cognitive processing was momentarily interrupted ({last_error}). Please try again."
+
+        # Common sense voice post-formatting
+        if channel == "voice" and reply_text:
+            reply_text = re.sub(r'\*{1,4}', '', reply_text)
+            reply_text = re.sub(r'#{1,6}\s*', '', reply_text)
+            reply_text = re.sub(r'^[•\-\*]\s*', '', reply_text, flags=re.MULTILINE)
+            reply_text = reply_text.strip()
 
         # Record conversation into SQLite history and update settings/learnings
         try:

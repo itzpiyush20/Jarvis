@@ -108,13 +108,24 @@ async def run_cli_briefing():
     print("\n" + "=" * 60 + "\n")
 
 def run_all_services():
-    """Runs both Telegram Bot and Desktop Voice Assistant concurrently if hardware permits."""
+    """Runs both Telegram Bot and Desktop Voice Assistant concurrently on local laptop hardware."""
     print_banner()
 
     if config.IS_CLOUD_DEPLOYMENT:
         print("[*] Cloud deployment detected. Physical mic listener disabled; running Telegram Bot.")
         start_telegram_service()
         return
+
+    from voice.listener import acquire_instance_lock
+    if not acquire_instance_lock():
+        print("[*] Another Jarvis instance is already running on this machine.")
+        return
+
+    pid_file = config.AUDIO_DIR / "jarvis.pid"
+    try:
+        pid_file.write_text(str(os.getpid()))
+    except Exception:
+        pass
 
     # Attempt to initialize Desktop Voice Assistant on local hardware
     assistant = None
@@ -127,13 +138,21 @@ def run_all_services():
     except Exception as e:
         print(f"[!] Desktop Voice Assistant could not start ({e}). Continuing with Telegram service.")
 
-    # Run Telegram Bot in the foreground
+    # Run Telegram Bot and Autonomous Scheduler in the foreground
     try:
         start_telegram_service()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         print("\n[*] Shutting down Jarvis Unified Services. Have a wonderful day, Sir.")
+    finally:
         if assistant:
-            assistant.stop()
+            try:
+                assistant.stop()
+            except Exception:
+                pass
+        try:
+            pid_file.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 def run_voice_only():
     """Starts the standalone desktop voice assistant."""

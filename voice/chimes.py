@@ -45,13 +45,25 @@ def play_chime(tones: list[tuple[float, float]], volume: float = 0.22, blocking:
         # Audio playback should never crash the main loop
         pass
 
+def is_quiet_hours() -> bool:
+    """Detects whether current local IST time is during late night quiet hours (11 PM - 6 AM)."""
+    import datetime
+    try:
+        ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        now = datetime.datetime.now(ist_tz)
+        return now.hour >= 23 or now.hour < 6
+    except Exception:
+        return False
+
 def play_wake_chime():
-    """Plays an alert chime when 'Jarvis' wake-word is detected (Ascending C5 -> G5)."""
-    play_chime([(523.25, 0.09), (783.99, 0.16)], volume=0.25, blocking=True)
+    """Plays an alert chime when 'Jarvis' wake-word is detected (Ascending C5 -> G5). Softened at late night."""
+    vol = 0.09 if is_quiet_hours() else 0.25
+    play_chime([(523.25, 0.06), (783.99, 0.10)], volume=vol, blocking=False)
 
 def play_thinking_chime():
-    """Plays a soft acknowledging blip when command recording finishes (E5)."""
-    play_chime([(659.25, 0.10)], volume=0.18, blocking=True)
+    """Plays a soft acknowledging blip when command recording finishes (E5). Softened at late night."""
+    vol = 0.07 if is_quiet_hours() else 0.18
+    play_chime([(659.25, 0.09)], volume=vol, blocking=True)
 
 def play_audio_file(file_path: str | Path, blocking: bool = True):
     """Plays an audio file (.mp3, .wav) through laptop speakers using sounddevice and soundfile."""

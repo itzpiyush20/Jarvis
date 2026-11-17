@@ -48,7 +48,24 @@
 
 ---
 
-## 🟡 Phase 4: Stark Holographic Desktop HUD & Waveform Visualizer (UPCOMING)
+## 🟢 Phase 4: Common Sense & Pragmatic Intuition Engine (COMPLETED)
+*Equipping Jarvis with real-world human tact, theory of mind, implicit intent understanding, and channel awareness.*
+- [x] **Implicit Human Intent Execution**:
+  - Automatically translates natural human expressions into immediate Win32 hardware actions without requiring command syntax (*"It's too loud"* $\rightarrow$ drops volume; *"Can't hear you"* $\rightarrow$ raises volume/unmutes; *"Screen is blinding"* $\rightarrow$ dims display; *"I need to focus"* $\rightarrow$ focus mode; *"Heading out"* $\rightarrow$ locks workstation).
+- [x] **Bedtime & Sleep Protocol**:
+  - Saying *"Good night"*, *"Going to sleep"*, or *"Turning in"* dims display brightness to 15%, secures the workstation, and readies tomorrow's morning brief.
+- [x] **Dual-Channel Tact (Voice vs Telegram)**:
+  - Voice channel strictly limits spoken output to 1–2 crisp, human sentences with zero asterisks, headers, bullets, or URLs.
+  - Telegram channel provides rich, comprehensive, beautifully structured executive dossier formatting.
+- [x] **Situational & Temporal Quiet Hours**:
+  - Automatic time-of-day classification with late-night protocol (11:00 PM – 6:00 AM IST) that halves procedural chime volume and adopts calm, whisper-soft brevity.
+- [x] **Contextual Proactivity & Sensible Defaults**:
+  - Active battery telemetry checking during app launching with low-battery heads-up warnings.
+  - Elimination of clarifying question friction by adopting smart default times (e.g. 7:00 PM / 9:00 AM) and stating assumptions upfront.
+
+---
+
+## 🟡 Phase 5: Stark Holographic Desktop HUD & Waveform Visualizer (UPCOMING)
 *A futuristic, minimalist visual interface on your Windows desktop.*
 - [ ] **Transparent Desktop HUD**:
   - A sleek, floating, dark-mode transparent HUD widget on your desktop (customizable or minimized).

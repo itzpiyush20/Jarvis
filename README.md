@@ -11,6 +11,13 @@ An autonomous, multi-modal personal assistant designed for mobile productivity v
   - Strict safety protocols: Read-only defaults, zero deletions, and two-phase confirmation for critical actions.
   - Windows IPv4 DNS optimization to eliminate socket timeouts.
 
+- **💡 Common Sense & Pragmatic Intuition Engine**:
+  - **Implicit Intent Understanding**: Reads between the lines rather than requiring rigid command syntax (*"It's too loud"* $\rightarrow$ lowers volume; *"Can't hear you"* $\rightarrow$ raises volume; *"Screen is blinding me"* $\rightarrow$ dims display; *"I need to focus"* $\rightarrow$ initiates focus mode; *"Heading out"* $\rightarrow$ locks workstation).
+  - **Bedtime & Good Night Routine**: Saying *"Good night"* or *"Going to sleep"* dims the screen, locks the workstation, and readies tomorrow's morning brief.
+  - **Channel-Aware Response Tact**: Voice mode (`channel="voice"`) speaks in 1–2 crisp, natural sentences with zero markdown or list noise; Telegram mode provides rich, executive structured layouts.
+  - **Situational & Temporal Quiet Hours**: Automatically softens wake chimes and adopts gentle quiet-hour protocols during late night (11:00 PM – 6:00 AM).
+  - **Contextual Proactivity & Sensible Defaults**: Connects live battery telemetry and time-of-day to provide heads-up warnings without friction or interrogating clarifying questions.
+
 - **🎙️ Voice & Conversational Intelligence**:
   - **Hands-Free Desktop Wake-Word ("Jarvis")**: Call *"Jarvis"* or *"Hey Jarvis"* out loud at your desk. It detects your voice using an offline ONNX wake-word engine, plays an activation chime, records your query, and speaks back through your laptop speakers!
   - **Voice Notes in Telegram**: Speak directly to Jarvis via Telegram voice messages. Jarvis transcribes using Gemini's native audio model and replies with a spoken voice note.

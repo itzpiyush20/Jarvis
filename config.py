@@ -74,5 +74,11 @@ IS_CLOUD_DEPLOYMENT = bool(
 _default_wake = "false" if IS_CLOUD_DEPLOYMENT else "true"
 ENABLE_WAKE_WORD = os.getenv("ENABLE_WAKE_WORD", _default_wake).lower() in ("true", "1", "yes")
 WAKE_WORD_MODEL = os.getenv("WAKE_WORD_MODEL", "hey_jarvis_v0.1.onnx")
-WAKE_WORD_THRESHOLD = float(os.getenv("WAKE_WORD_THRESHOLD", "0.22"))
+WAKE_WORD_THRESHOLD = float(os.getenv("WAKE_WORD_THRESHOLD", "0.1"))
 MIC_DEVICE_INDEX = int(os.getenv("MIC_DEVICE_INDEX")) if os.getenv("MIC_DEVICE_INDEX", "").strip().isdigit() else None
+
+# Software microphone gain multiplier — amplifies quiet laptop mics before
+# wake-word processing. Set higher (e.g. 10-30) if your mic is very quiet.
+# "auto" will calibrate during startup.
+_mic_gain_raw = os.getenv("MIC_GAIN", "auto")
+MIC_GAIN = _mic_gain_raw if _mic_gain_raw.lower() == "auto" else float(_mic_gain_raw)

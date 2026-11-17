@@ -5,6 +5,7 @@ import sys
 import html
 import re
 import datetime
+import io
 from pathlib import Path
 
 # Ensure project root is in sys.path
@@ -44,10 +45,14 @@ google = GoogleServices()
 scheduler = JarvisScheduler()
 
 def is_authorized(update: Update) -> bool:
-    """Verifies that the sender matches TELEGRAM_USER_ID if configured."""
+    """Verifies that the sender strictly matches the configured TELEGRAM_USER_ID."""
     if not config.TELEGRAM_USER_ID:
-        return True
-    return str(update.effective_user.id) == str(config.TELEGRAM_USER_ID)
+        logger.warning("Access blocked: TELEGRAM_USER_ID is not configured in .env or environment.")
+        return False
+    user = update.effective_user
+    if not user:
+        return False
+    return str(user.id) == str(config.TELEGRAM_USER_ID)
 
 def get_context_for_query(query: str) -> str:
     """Gathers calendar, email, or task context relevant to the user query."""
@@ -137,22 +142,24 @@ def check_daily_first_interaction() -> bool:
     return False
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    user_name = update.effective_user.first_name or config.USER_NAME
+    user = update.effective_user
+    user_id = str(user.id) if user else ""
+    user_name = (user.first_name if user else None) or config.USER_NAME
 
     if not config.TELEGRAM_USER_ID:
-        config.TELEGRAM_USER_ID = user_id
-        env_path = PROJECT_ROOT / ".env"
-        if env_path.exists():
-            with open(env_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            if "TELEGRAM_USER_ID=" in content:
-                content = content.replace("TELEGRAM_USER_ID=", f"TELEGRAM_USER_ID={user_id}")
-            else:
-                content += f"\nTELEGRAM_USER_ID={user_id}\n"
-            with open(env_path, "w", encoding="utf-8") as f:
-                f.write(content)
-        logger.info(f"Registered primary user ID: {user_id}")
+        logger.warning(f"Unconfigured bot received /start from user ID: {user_id}")
+        await update.message.reply_text(
+            f"⚠️ <b>Security Notice:</b> Bot owner is not configured.\n"
+            f"Your Telegram User ID is: <code>{user_id}</code>\n\n"
+            f"To secure this assistant, add <code>TELEGRAM_USER_ID={user_id}</code> to your <code>.env</code> file or cloud environment variables.",
+            parse_mode="HTML"
+        )
+        return
+
+    if not is_authorized(update):
+        logger.warning(f"Unauthorized access attempt to /start from user ID: {user_id}")
+        await update.message.reply_text("⛔ Unauthorized access. This private assistant is locked to its owner.")
+        return
 
     loc = brain.location_manager.get_user_location()
 
@@ -197,7 +204,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_first_today = check_daily_first_interaction()
 
     context_data = await asyncio.to_thread(get_context_for_query, user_text)
-    reply = await asyncio.to_thread(brain.ask, user_text, context_data)
+    reply = await asyncio.to_thread(brain.ask, user_text, context_data, "telegram")
 
     reply_markup = None
     if is_first_today:
@@ -388,7 +395,7 @@ async def handle_voice_reply_request(update: Update, context: ContextTypes.DEFAU
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
 
     context_data = await asyncio.to_thread(get_context_for_query, query)
-    reply = await asyncio.to_thread(brain.ask, query, context_data)
+    reply = await asyncio.to_thread(brain.ask, query, context_data, "voice")
     audio_path = await generate_speech_file(reply, filename=f"reply_{update.message.id}.mp3")
 
     with open(audio_path, "rb") as audio:
@@ -828,6 +835,14 @@ def start_telegram_service():
             run_standalone_health_server(int(port_str))
             return
         return
+
+    if not config.TELEGRAM_USER_ID:
+        print("\n" + "=" * 60)
+        print("[!] SECURITY NOTICE: TELEGRAM_USER_ID is not set.")
+        print("    Jarvis will strictly reject all commands until TELEGRAM_USER_ID")
+        print("    is set in .env or cloud environment variables.")
+        print("    Send /start to the bot from your Telegram account to find your ID.")
+        print("=" * 60 + "\n")
 
     app = build_telegram_application()
     if not app:

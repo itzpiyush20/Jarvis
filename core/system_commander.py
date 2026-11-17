@@ -455,16 +455,22 @@ class SystemCommander:
         """
         clean = target.strip().lower()
 
+        # Common sense hardware check: Warn if battery is low and discharging
+        bat = self.get_battery_status()
+        low_bat_note = ""
+        if bat.get("available") and bat.get("is_laptop") and not bat.get("is_plugged") and bat.get("percent", 100) <= 20:
+            low_bat_note = f" (Heads-up Sir: battery is at {bat.get('percent')}%, please plug in)."
+
         # 1. Check curated websites or explicit web URLs
         if clean in self.web_catalog:
             url = self.web_catalog[clean]
             webbrowser.open(url)
-            return True, f"Opening {clean.capitalize()} in your default browser, Sir."
+            return True, f"Opening {clean.capitalize()} in your default browser, Sir.{low_bat_note}"
 
         if any(clean.startswith(prefix) for prefix in ("http://", "https://", "www.")) or any(clean.endswith(tld) for tld in (".com", ".org", ".net", ".io", ".in", ".co", ".ai")):
             url = clean if clean.startswith("http") else f"https://{clean}"
             webbrowser.open(url)
-            return True, f"Navigating to {url}, Sir."
+            return True, f"Navigating to {url}, Sir.{low_bat_note}"
 
         # 2. Check curated application catalog
         for app_alias, cmd in self.app_catalog.items():
@@ -475,7 +481,7 @@ class SystemCommander:
                         os.startfile(cmd)
                     else:
                         subprocess.Popen(cmd, shell=True)
-                    return True, f"Launching {app_alias.title()}, Sir."
+                    return True, f"Launching {app_alias.title()}, Sir.{low_bat_note}"
                 except Exception as e:
                     return False, f"Failed to launch {app_alias}: {e}"
 
@@ -484,19 +490,19 @@ class SystemCommander:
         if reg_path:
             try:
                 subprocess.Popen(reg_path, shell=True)
-                return True, f"Launching {os.path.basename(reg_path)}, Sir."
+                return True, f"Launching {os.path.basename(reg_path)}, Sir.{low_bat_note}"
             except Exception as e:
                 return False, f"Failed to launch {reg_path}: {e}"
 
         # 4. Fallback: Attempt generic startfile or search URL
         try:
             os.startfile(target)
-            return True, f"Opening {target}, Sir."
+            return True, f"Opening {target}, Sir.{low_bat_note}"
         except Exception:
             # If not an executable, treat as a quick web search / portal
             search_url = f"https://www.google.com/search?q={urllib_parse(target)}"
             webbrowser.open(search_url)
-            return True, f"I couldn't locate a local program named '{target}', so I've opened a search for it, Sir."
+            return True, f"I couldn't locate a local program named '{target}', so I've opened a search for it, Sir.{low_bat_note}"
 
     # =====================================================================
     # 4. WORKSTATION SECURITY & POWER CONTROLS
@@ -602,74 +608,97 @@ class SystemCommander:
 
     def intercept_command(self, query: str) -> Optional[str]:
         """
-        Inspects query for direct Laptop OS commands.
+        Inspects query for direct Laptop OS commands and explicit hardware intents.
         If matched, executes the hardware action immediately with microsecond latency
         and returns a verbal reply, bypassing cloud LLM latency for pure hardware tasks.
+        Conversational or ambiguous queries are passed through to the LLM.
         """
         import re
         lower = query.lower().strip()
 
-        # Workstation Lock
-        if re.search(r'\b(?:lock\s+(?:the\s+)?(?:laptop|screen|pc|workstation|computer)|lock\s+down)\b', lower):
-            _, reply = self.lock_workstation()
-            return reply
-
-        # Sleep / Suspend
-        if re.search(r'\b(?:put\s+(?:the\s+)?(?:laptop|pc|computer)\s+to\s+sleep|sleep\s+mode|go\s+to\s+sleep)\b', lower):
-            _, reply = self.sleep_workstation()
-            return reply
-
-        # Volume Mute / Unmute
-        if re.search(r'\b(?:unmute|sound\s+on)\b', lower):
+        # 1. Volume & Audio Control (Explicit Commands Only)
+        if re.search(r'^(?:please\s+|jarvis\s+)*(?:unmute|sound\s+on|restore\s+audio)(?:\s+(?:the\s+)?(?:laptop|pc|sound|audio|speakers|volume))?\s*$', lower):
             _, reply = self.set_mute(False)
             return reply
-        if re.search(r'\b(?:mute|silence\s+audio|shut\s+up)\b', lower):
+
+        if re.search(r'^(?:please\s+|jarvis\s+)*(?:mute|silence\s+audio)(?:\s+(?:the\s+)?(?:laptop|pc|sound|audio|speakers|volume))?\s*$', lower):
             _, reply = self.set_mute(True)
             return reply
 
-        # Absolute Volume (e.g. "volume 40%", "set volume to 60", "volume 80")
-        vol_match = re.search(r'\b(?:volume|sound)\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)?\b', lower)
+        # Absolute Volume (e.g. "volume 40%", "set volume to 60", "laptop volume 80")
+        vol_match = re.search(r'^(?:please\s+|jarvis\s+)*(?:set\s+)?(?:laptop\s+|system\s+)?(?:volume|sound)\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)?\s*$', lower)
         if vol_match:
             val = int(vol_match.group(1))
             _, reply = self.set_volume(val)
             return reply
 
-        # Relative Volume (e.g. "turn up the volume", "volume down", "increase volume")
-        if re.search(r'\b(?:increase|turn\s+up|raise)\s+(?:the\s+)?(?:volume|sound)\b', lower):
+        # Relative Volume (e.g. "turn up the volume", "volume down", "increase sound")
+        if re.search(r'^(?:please\s+|jarvis\s+)*(?:increase|turn\s+up|raise)\s+(?:the\s+)?(?:volume|sound)(?:\s+by\s+\d+%)?\s*$', lower) or lower in ("louder", "turn it up"):
+            if self.is_muted():
+                self.set_mute(False)
             _, reply = self.change_volume(+15)
             return reply
-        if re.search(r'\b(?:decrease|turn\s+down|lower)\s+(?:the\s+)?(?:volume|sound)\b', lower):
+        if re.search(r'^(?:please\s+|jarvis\s+)*(?:decrease|turn\s+down|lower)\s+(?:the\s+)?(?:volume|sound)(?:\s+by\s+\d+%)?\s*$', lower) or lower in ("softer", "turn it down", "lower the volume"):
             _, reply = self.change_volume(-15)
             return reply
 
-        # Brightness / Dimming
-        bright_match = re.search(r'\b(?:brightness|screen\s+light)\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)?\b', lower)
+        # 2. Screen Brightness Control (Explicit Commands Only)
+        bright_match = re.search(r'^(?:please\s+|jarvis\s+)*(?:set\s+)?(?:screen\s+|display\s+)?brightness\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)?\s*$', lower)
         if bright_match:
             val = int(bright_match.group(1))
             _, reply = self.set_brightness(val)
             return reply
-        if re.search(r'\b(?:dim\s+(?:the\s+)?(?:screen|display|brightness))\b', lower):
+        if re.search(r'^(?:please\s+|jarvis\s+)*(?:dim\s+(?:the\s+)?(?:screen|display|brightness)|reduce\s+brightness)\s*$', lower):
             _, reply = self.set_brightness(30)
             return reply
-        if re.search(r'\b(?:brighten\s+(?:the\s+)?(?:screen|display)|max\s+brightness)\b', lower):
+        if re.search(r'^(?:please\s+|jarvis\s+)*(?:brighten\s+(?:the\s+)?(?:screen|display)|max\s+brightness)\s*$', lower):
             _, reply = self.set_brightness(100)
             return reply
 
-        # Battery / Power Telemetry
-        if re.search(r'\b(?:battery|power\s+level|charging\s+status|how\s+much\s+battery)\b', lower):
-            bat = self.get_battery_status()
-            return f"Sir, {bat.get('description')}"
+        # 3. Workstation Security & Power Routines
+        # Sleep / Suspend: MUST target laptop/pc/machine, not conversational "I need to go to sleep"
+        if re.search(r'^(?:please\s+|jarvis\s+)*(?:put\s+(?:the\s+)?(?:laptop|pc|computer|system)\s+to\s+sleep|sleep\s+(?:the\s+)?(?:laptop|pc|computer|system)|suspend\s+(?:the\s+)?(?:laptop|pc|computer|system)|enter\s+sleep\s+mode)\s*$', lower):
+            _, reply = self.sleep_workstation()
+            return reply
+
+        # Explicit Workstation Lock
+        if re.search(r'^(?:please\s+|jarvis\s+)*(?:lock\s+(?:the\s+)?(?:laptop|screen|pc|workstation|computer)|lock\s+down)\s*$', lower):
+            _, reply = self.lock_workstation()
+            return reply
+
+        # Exact bedtime signoff (e.g. "Good night Jarvis", "Goodnight")
+        if re.search(r'^(?:good\s*night(?:\s+jarvis)?|goodnight|i(?:(?:\'m|\s+am))\s+heading\s+to\s+bed\s*(?:now)?)\s*[\.!]*$', lower):
+            self.set_brightness(15)
+            self.lock_workstation()
+            return "Good night, Sir. Display dimmed and workstation secured. Sleep well."
+
+        # Explicit stepping out declaration
+        if re.search(r'^(?:jarvis\s+)?(?:i(?:(?:\'m|\s+am))\s+(?:stepping\s+out|leaving\s+the\s+desk))\s*[\.!]*$', lower):
+            self.lock_workstation()
+            return "Workstation locked for your security, Sir. Have a good trip."
+
+        # Focus mode command
+        if re.search(r'^(?:jarvis\s+)?(?:enable\s+|start\s+)?focus\s+mode\s*$', lower):
+            self.set_volume(15)
+            return "Focus mode engaged, Sir. Master audio lowered to 15% and alerts suppressed. Time to build."
+
+        # 4. Battery / Power Telemetry (Laptop Only - Exclude phone battery queries)
+        if "phone" not in lower:
+            if re.search(r'^(?:jarvis\s+)?(?:what(?:\'s|\s+is)\s+(?:the\s+)?(?:laptop\s+|system\s+)?battery(?:\s+level|\s+percentage|\s+status)?|battery\s+(?:level|status|percentage)|how\s+much\s+battery\s+(?:is\s+left|remains|do\s+we\s+have)|check\s+(?:laptop\s+)?battery)\s*[\?\.!]*$', lower) or \
+               re.search(r'\b(?:laptop\s+battery|system\s+battery)\b', lower):
+                bat = self.get_battery_status()
+                return f"Sir, {bat.get('description')}"
 
         # System Specs / Hardware Telemetry
-        if re.search(r'\b(?:system\s+(?:status|telemetry|specs|diagnostics)|hardware\s+status|laptop\s+status|ram\s+usage|cpu\s+usage)\b', lower):
+        if re.search(r'^(?:jarvis\s+)?(?:system\s+(?:status|telemetry|specs|diagnostics)|hardware\s+status|laptop\s+status|check\s+system|show\s+specs)\s*[\?\.!]*$', lower):
             return f"Current workstation telemetry, Sir:\n{self.get_system_telemetry()}"
 
-        # App & Website Launcher: "open <target>", "launch <target>"
+        # 5. App & Website Launcher: "open <target>", "launch <target>"
         launch_match = re.search(r'^(?:jarvis\s+)?(?:open|launch)\s+(.+)$', lower)
         if launch_match:
             target = launch_match.group(1).strip()
             # Avoid matching conversational phrases like "open to suggestions"
-            if target and target not in ("to suggestions", "up", "a discussion", "my eyes"):
+            if target and target not in ("to suggestions", "up", "a discussion", "my eyes", "a file", "the door"):
                 _, reply = self.launch(target)
                 return reply
 

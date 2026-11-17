@@ -8,4 +8,4 @@ If Not fso.FileExists(pythonPath) Then
     pythonPath = "pythonw.exe"
 End If
 
-WshShell.Run """" & pythonPath & """ main.py --voice", 0, False
+WshShell.Run """" & pythonPath & """ main.py --all", 0, False

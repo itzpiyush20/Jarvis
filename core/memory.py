@@ -16,7 +16,7 @@ class MemoryManager:
     def _get_connection(self):
         if self._shared_conn is not None:
             return self._shared_conn
-        return sqlite3.connect(self.db_path, check_same_thread=False)
+        return sqlite3.connect(self.db_path, check_same_thread=False, timeout=10.0)
 
     def _init_db(self):
         with self._get_connection() as conn:

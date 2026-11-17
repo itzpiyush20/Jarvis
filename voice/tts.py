@@ -16,14 +16,12 @@ from config import AUDIO_DIR
 from core.memory import MemoryManager
 
 # Default Neural Voice for Jarvis:
-# "en-IN-PrabhatNeural" (Clear, professional Indian English male)
-# "en-US-BrianNeural" (Articulate, natural, conversational AI male)
-# "en-IN-NeerjaNeural" (Crisp, professional Indian English female)
-# "en-US-ChristopherNeural" (Deep, authoritative US male)
+# "en-IN-PrabhatNeural" (Clear, warm, natural, human Indian English male)
+# The voice remains strictly CONSTANT, while human-like prosody/rate provides emotional nuance.
 DEFAULT_VOICE = "en-IN-PrabhatNeural"
 
 def get_active_voice() -> str:
-    """Retrieves the active voice model configured in persistent settings."""
+    """Retrieves the active constant voice model configured in persistent settings."""
     try:
         mem = MemoryManager()
         voice = mem.get_setting("voice_name", DEFAULT_VOICE)
@@ -169,6 +167,7 @@ async def generate_speech_file(text: str, filename: str = "response.mp3", voice:
     """
     Sanitizes text and synthesizes clean neural speech to an MP3 file.
     Uses active dynamic voice setting (default: en-IN-PrabhatNeural).
+    Applies natural human conversational cadence (+3% rate for lively, natural pace).
     """
     AUDIO_DIR.mkdir(exist_ok=True, parents=True)
     output_path = AUDIO_DIR / filename
@@ -177,8 +176,9 @@ async def generate_speech_file(text: str, filename: str = "response.mp3", voice:
     speech_text = create_spoken_reply(text)
 
     try:
-        communicate = edge_tts.Communicate(speech_text, selected_voice)
-        await asyncio.wait_for(communicate.save(str(output_path)), timeout=4.0)
+        # rate="+3%" matches everyday conversational rhythm, pitch="+0Hz" keeps voice timbre steady
+        communicate = edge_tts.Communicate(speech_text, selected_voice, rate="+3%", pitch="+0Hz")
+        await asyncio.wait_for(communicate.save(str(output_path)), timeout=5.0)
         return output_path
     except Exception as e:
         print(f"[-] edge-tts synthesis unavailable ({e}), using instant Windows native voice fallback.")

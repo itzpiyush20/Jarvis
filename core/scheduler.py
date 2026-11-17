@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import html
 import logging
 from typing import Set, Optional, Dict, Any
 from pathlib import Path
@@ -11,6 +12,9 @@ from voice.tts import generate_speech_file
 from integrations.google_services import GoogleServices
 
 logger = logging.getLogger("JarvisScheduler")
+
+# Indian Standard Time (UTC+5:30) for scheduled briefings and alerts
+IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
 class JarvisScheduler:
     """
@@ -36,38 +40,75 @@ class JarvisScheduler:
         self._last_briefing_date: Optional[datetime.date] = None
         self._is_running = False
 
-    async def send_user_message(self, text: str, parse_mode: str = "Markdown"):
-        """Sends a text message to the primary Telegram user."""
+    async def send_user_message(self, text: str, parse_mode: Optional[str] = "HTML"):
+        """Sends a text message to the primary Telegram user with safe HTML parsing and fallback."""
         if not self.bot_app or not config.TELEGRAM_USER_ID:
             logger.info(f"[Scheduler Message]: {text}")
             return
+
+        formatted = text
+        if parse_mode == "HTML" and not ("<b>" in text or "<code>" in text or "<pre>" in text):
+            try:
+                from integrations.telegram_bot import format_to_telegram_html
+                formatted = format_to_telegram_html(text)
+            except Exception:
+                formatted = html.escape(text)
+
         try:
             await self.bot_app.bot.send_message(
                 chat_id=config.TELEGRAM_USER_ID,
-                text=text,
+                text=formatted,
                 parse_mode=parse_mode
             )
         except Exception as e:
-            logger.error(f"[-] Failed to send Telegram message from scheduler: {e}")
+            logger.warning(f"Scheduler HTML send failed ({e}), falling back to plain text...")
+            try:
+                await self.bot_app.bot.send_message(
+                    chat_id=config.TELEGRAM_USER_ID,
+                    text=text,
+                    parse_mode=None
+                )
+            except Exception as e2:
+                logger.error(f"[-] Failed to send Telegram message from scheduler: {e2}")
 
-    async def send_user_voice(self, audio_path: Path, caption: str = ""):
-        """Sends a voice note with caption to the primary Telegram user."""
+    async def send_user_voice(self, audio_path: Path, caption: str = "", parse_mode: Optional[str] = "HTML"):
+        """Sends a voice note with formatted caption to the primary Telegram user."""
         if not self.bot_app or not config.TELEGRAM_USER_ID:
             logger.info(f"[Scheduler Voice]: {caption}")
             return
+
+        formatted_caption = caption
+        if parse_mode == "HTML" and caption and not ("<b>" in caption or "<code>" in caption or "<i>" in caption):
+            try:
+                from integrations.telegram_bot import format_to_telegram_html
+                formatted_caption = format_to_telegram_html(caption)
+            except Exception:
+                formatted_caption = html.escape(caption)
+
         try:
             with open(audio_path, "rb") as audio:
                 await self.bot_app.bot.send_voice(
                     chat_id=config.TELEGRAM_USER_ID,
                     voice=audio,
-                    caption=caption
+                    caption=formatted_caption[:1024] if formatted_caption else None,
+                    parse_mode=parse_mode
                 )
         except Exception as e:
-            logger.error(f"[-] Failed to send Telegram voice from scheduler: {e}")
+            logger.warning(f"Scheduler voice send with {parse_mode} caption failed ({e}), falling back to plain text...")
+            try:
+                with open(audio_path, "rb") as audio:
+                    await self.bot_app.bot.send_voice(
+                        chat_id=config.TELEGRAM_USER_ID,
+                        voice=audio,
+                        caption=caption[:1024] if caption else None,
+                        parse_mode=None
+                    )
+            except Exception as e2:
+                logger.error(f"[-] Failed to send Telegram voice from scheduler: {e2}")
 
     async def compile_briefing_text(self) -> str:
-        """Compiles a full daily briefing summary."""
-        now = datetime.datetime.now()
+        """Compiles a full daily briefing summary in Indian Standard Time (IST)."""
+        now = datetime.datetime.now(IST)
         greeting = "Good morning" if now.hour < 12 else ("Good afternoon" if now.hour < 17 else "Good evening")
         date_str = now.strftime("%A, %B %d, %Y")
 
@@ -128,10 +169,10 @@ class JarvisScheduler:
         )
         try:
             audio_path = await generate_speech_file(spoken_text[:500], filename="morning_briefing.mp3")
-            await self.send_user_voice(audio_path, caption=briefing_text[:1024])
+            await self.send_user_voice(audio_path, caption=briefing_text[:1024], parse_mode="HTML")
         except Exception as e:
             logger.error(f"[-] Voice synthesis failed for briefing: {e}")
-            await self.send_user_message(briefing_text)
+            await self.send_user_message(briefing_text, parse_mode="HTML")
 
     async def check_upcoming_meetings(self):
         """Scans Google Calendar for events starting in 10-15 minutes."""
@@ -162,15 +203,18 @@ class JarvisScheduler:
                     # Alert if meeting starts between 0 and alert_window seconds from now
                     if 0 <= delta_seconds <= alert_window:
                         mins_left = max(1, int(delta_seconds // 60))
+                        clean_summary = html.escape(str(ev.get('summary', 'Untitled Meeting')))
+                        clean_start_display = html.escape(str(ev.get('start', '')))
                         msg = (
-                            f"🔔 **Upcoming Meeting in ~{mins_left} minutes!**\n"
-                            f"• **Event:** {ev.get('summary')}\n"
-                            f"• **Starts at:** {ev.get('start')}"
+                            f"🔔 <b>Upcoming Meeting in ~{mins_left} minutes!</b>\n"
+                            f"• <b>Event:</b> {clean_summary}\n"
+                            f"• <b>Starts at:</b> <code>{clean_start_display}</code>"
                         )
                         if ev.get("location"):
-                            msg += f"\n• **Location:** {ev['location']}"
+                            clean_loc = html.escape(str(ev.get("location")))
+                            msg += f"\n• <b>Location:</b> {clean_loc}"
                         self._alerted_event_ids.add(ev_id)
-                        await self.send_user_message(msg)
+                        await self.send_user_message(msg, parse_mode="HTML")
             except Exception as e:
                 logger.debug(f"Error parsing event start time ({start_str}): {e}")
 
@@ -186,17 +230,20 @@ class JarvisScheduler:
 
             self._alerted_email_ids.add(em_id)
             spoken = f"Sir, urgent email received from {em.get('from')}. Subject: {em.get('subject')}."
+            clean_from = html.escape(str(em.get('from', 'Unknown Sender')))
+            clean_subj = html.escape(str(em.get('subject', 'No Subject')))
+            clean_snip = html.escape(str(em.get('snippet', '')[:120]))
             msg = (
-                f"🚨 **URGENT EMAIL DETECTED** 🚨\n\n"
-                f"• **From:** {em.get('from')}\n"
-                f"• **Subject:** {em.get('subject')}\n"
-                f"• **Snippet:** _{em.get('snippet')}_"
+                f"🚨 <b>URGENT EMAIL DETECTED</b> 🚨\n\n"
+                f"• <b>From:</b> {clean_from}\n"
+                f"• <b>Subject:</b> {clean_subj}\n"
+                f"• <b>Snippet:</b> <i>{clean_snip}...</i>"
             )
             try:
                 audio_path = await generate_speech_file(spoken, filename=f"urgent_{em_id[:8]}.mp3")
-                await self.send_user_voice(audio_path, caption=msg)
+                await self.send_user_voice(audio_path, caption=msg, parse_mode="HTML")
             except Exception:
-                await self.send_user_message(msg)
+                await self.send_user_message(msg, parse_mode="HTML")
 
     async def check_battery_status(self):
         """Scans laptop power status and alerts when battery drops below 20% on discharge."""
@@ -222,28 +269,28 @@ class JarvisScheduler:
             )
             try:
                 audio_path = await generate_speech_file(spoken, filename="low_battery_alert.mp3")
-                await self.send_user_voice(audio_path, caption=msg)
+                await self.send_user_voice(audio_path, caption=msg, parse_mode="HTML")
             except Exception:
                 await self.send_user_message(msg, parse_mode="HTML")
 
     async def run_loop(self):
-        """Main autonomous scheduler loop running periodically."""
+        """Main autonomous scheduler loop running periodically in IST."""
         self._is_running = True
-        logger.info("[+] Autonomous Jarvis Scheduler started.")
+        logger.info("[+] Autonomous Jarvis Scheduler started (IST timezone calibrated).")
 
         cycle_count = 0
         while self._is_running:
             try:
-                now = datetime.datetime.now()
+                now = datetime.datetime.now(IST)
 
-                # 1. Morning briefing trigger (once per day, dynamically configured)
+                # 1. Morning briefing trigger (once per day, dynamically configured in IST)
                 briefing_h = int(self.memory.get_setting("briefing_hour", "8"))
                 briefing_m = int(self.memory.get_setting("briefing_minute", "0"))
                 if (now.hour == briefing_h and
                     now.minute >= briefing_m and
                     self._last_briefing_date != now.date()):
                     self._last_briefing_date = now.date()
-                    logger.info("[*] Delivering automated morning briefing...")
+                    logger.info("[*] Delivering automated morning briefing (IST)...")
                     await self.deliver_daily_briefing()
 
                 # 2. Upcoming meeting alerts (every minute)

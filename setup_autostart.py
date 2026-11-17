@@ -16,7 +16,7 @@ $sc.TargetPath = 'wscript.exe'
 $sc.Arguments = '"{vbs_path}"'
 $sc.WorkingDirectory = '{project_dir}'
 $sc.WindowStyle = 7
-$sc.Description = 'Jarvis AI Assistant Always-On Background Voice Listener'
+$sc.Description = 'Jarvis Unified AI Assistant (Voice, Telegram & Scheduler)'
 $sc.Save()
 """
     ps_file = project_dir / "temp_audio" / "create_shortcut.ps1"
