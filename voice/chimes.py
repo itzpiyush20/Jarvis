@@ -65,14 +65,25 @@ def play_thinking_chime():
     vol = 0.07 if is_quiet_hours() else 0.18
     play_chime([(659.25, 0.09)], volume=vol, blocking=True)
 
-def play_audio_file(file_path: str | Path, blocking: bool = True):
-    """Plays an audio file (.mp3, .wav) through laptop speakers using sounddevice and soundfile."""
+def play_audio_file(file_path: str | Path, blocking: bool = True, cancel_event=None):
+    """
+    Plays an audio file (.mp3, .wav) through laptop speakers using sounddevice and soundfile.
+    Supports OpenJarvis-style barge-in: checks cancel_event to stop playback immediately.
+    """
     if sd is None or sf is None:
         return
     try:
         data, fs = sf.read(str(file_path))
         sd.play(data, fs)
         if blocking:
-            sd.wait()
+            if cancel_event is not None:
+                # Poll while waiting to allow instant interruption
+                while sd.get_stream() and sd.get_stream().active:
+                    if cancel_event.is_set():
+                        sd.stop()
+                        break
+                    time.sleep(0.04)
+            else:
+                sd.wait()
     except Exception as e:
         print(f"[-] Failed to play audio file {file_path}: {e}")

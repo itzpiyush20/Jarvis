@@ -339,10 +339,40 @@ class DesktopVoiceAssistant:
             filename = f"desktop_reply_{int(time.time())}.mp3"
             audio_path = speak_to_file(reply, filename=filename)
             
-            # 4. Play speech through laptop speakers
+            # 4. Play speech through laptop speakers with OpenJarvis-style Barge-In Interruption
             if audio_path.exists() and audio_path.stat().st_size > 500:
-                logger.info(f"🔊 [SPEAKING] Playing response through speakers...")
-                play_audio_file(audio_path, blocking=True)
+                logger.info(f"🔊 [SPEAKING] Playing response through speakers (Barge-in active)...")
+                cancel_event = threading.Event()
+
+                def _monitor_interruption():
+                    # Drain queue before starting speech monitor
+                    while not self.audio_queue.empty():
+                        try:
+                            self.audio_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                    time.sleep(0.35)  # Let initial audio start cleanly
+                    while not cancel_event.is_set():
+                        try:
+                            chunk = self.audio_queue.get(timeout=0.15)
+                            frame = self._amplify(chunk.flatten())
+                            # Check for user wake word or loud speech interruption
+                            pred = self.oww_model.predict(frame)
+                            score = pred.get(self.wake_model_name, 0.0)
+                            if score >= self.threshold:
+                                logger.info("\n⚡ [BARGE-IN] User interrupted Jarvis! Halting playback immediately.")
+                                cancel_event.set()
+                                break
+                        except queue.Empty:
+                            continue
+                        except Exception:
+                            break
+
+                monitor_t = threading.Thread(target=_monitor_interruption, daemon=True, name="BargeInMonitor")
+                monitor_t.start()
+                play_audio_file(audio_path, blocking=True, cancel_event=cancel_event)
+                cancel_event.set()
+
             logger.info("[✓] Finished speaking.")
         except Exception as e:
             logger.error(f"[-] Speech playback error: {e}", exc_info=True)
