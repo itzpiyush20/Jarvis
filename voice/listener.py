@@ -111,6 +111,26 @@ class DesktopVoiceAssistant:
         self.ack_audio_path = config.AUDIO_DIR / "jarvis_ack.mp3"
         self._ensure_ack_audio()
 
+        # OpenJarvis Operatives: Context Cache & Hardware Watchdog
+        from core.operatives import ContextCacheOperative, HardwareWatchdogOperative
+        self.context_cache = ContextCacheOperative(self.google, self.memory)
+        self.context_cache.start()
+
+        def _proactive_speak(text: str):
+            try:
+                p = speak_to_file(text, filename="proactive_alert.mp3")
+                if p.exists():
+                    play_audio_file(p, blocking=False)
+            except Exception:
+                pass
+
+        self.hardware_watchdog = HardwareWatchdogOperative(
+            self.brain.system_commander,
+            speak_callback=_proactive_speak,
+            notify_callback=notify_user
+        )
+        self.hardware_watchdog.start()
+
     def _calibrate_mic_gain(self):
         """
         Auto-calibrates software gain by sampling ~1 second of ambient room audio.
@@ -189,20 +209,21 @@ class DesktopVoiceAssistant:
         self.audio_queue.put(indata.copy())
 
     def _gather_context(self, query: str) -> str:
-        """Retrieves relevant Calendar, Gmail, or Task context based on query keywords."""
+        """Retrieves relevant Calendar, Gmail, or Task context instantly from warm RAM cache."""
         lower = query.lower()
         ctx = ""
-        if any(k in lower for k in ["schedule", "calendar", "meeting", "events", "agenda"]):
-            if self.google.is_configured():
-                agenda = self.google.format_daily_agenda()
+        if any(k in lower for k in ["schedule", "calendar", "meeting", "events", "agenda", "tomorrow", "today"]):
+            agenda = self.context_cache.get_agenda()
+            if agenda:
                 ctx += f"\nCurrent Calendar Agenda:\n{agenda}\n"
         if any(k in lower for k in ["email", "gmail", "inbox", "mail"]):
-            if self.google.is_configured():
-                unreads = self.google.get_unread_emails(max_results=3)
+            unreads = self.context_cache.get_unreads()
+            if unreads:
                 ctx += f"\nRecent Unread Emails: {unreads}\n"
         if any(k in lower for k in ["task", "todo", "reminder", "notes"]):
-            pending = self.memory.get_pending_tasks()
-            ctx += f"\nPending Tasks in Database: {pending}\n"
+            pending = self.context_cache.get_pending_tasks()
+            if pending:
+                ctx += f"\nPending Tasks in Database: {pending}\n"
         if any(k in lower for k in ["battery", "power", "charging", "laptop", "hardware", "system status", "specs", "ram", "cpu", "storage", "disk"]):
             telemetry = self.brain.system_commander.get_system_telemetry()
             ctx += f"\nLive Workstation Telemetry:\n{telemetry}\n"
